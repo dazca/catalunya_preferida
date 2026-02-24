@@ -4,7 +4,6 @@
  */
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import MapContainer from './components/MapContainer';
-import Sidebar from './components/Sidebar';
 import MunicipalityInfo from './components/MunicipalityInfo';
 import PointAnalysisPanel from './components/PointAnalysisPanel';
 import FormulaBar from './components/FormulaBar';
@@ -13,6 +12,7 @@ import { useT } from './i18n';
 import { useResourceData } from './hooks/useResourceData';
 import { computeAllScores } from './utils/scorer';
 import { computePointScore } from './utils/pointAnalysis';
+import { visualToRawFormula } from './utils/formulaEngine';
 import {
   renderHeatmapImage,
   viewportSpecForZoom,
@@ -22,7 +22,7 @@ import type { ViewportSpec } from './utils/heatmapGrid';
 import { onDemLoaded, loadViewportTiles } from './utils/demSlope';
 
 export default function App() {
-  const { layers, configs, analysisPoint, soloLayer } = useAppStore();
+  const { layers, configs, view, customFormula, formulaMode, analysisPoint, soloLayer, undo, redo } = useAppStore();
   const t = useT();
   const {
     municipalities,
@@ -51,11 +51,39 @@ export default function App() {
     return map;
   }, [municipalities]);
 
+  /** Canonical formula from the current visual state — used to detect manual edits. */
+  const enabledLayers = useMemo(() => layers.filter((l) => l.enabled), [layers]);
+  const visualRawFormula = useMemo(
+    () => visualToRawFormula(enabledLayers, configs),
+    [enabledLayers, configs],
+  );
+
+  /**
+   * Active formula for scoring.  Returns `undefined` (= use visual pipeline)
+   * when the stored customFormula matches the auto-generated visualRawFormula,
+   * because both paths are mathematically equivalent and the visual pipeline
+   * handles missing data and edge-cases more robustly.
+   * Only returns the formula string when the user has manually edited it.
+   */
+  const activeFormula = useMemo(() => {
+    if (formulaMode !== 'raw') return undefined;
+    const trimmed = customFormula.trim();
+    if (!trimmed) return undefined;
+    if (trimmed === visualRawFormula.trim()) return undefined; // auto-generated — use visual pipeline
+    return customFormula;
+  }, [formulaMode, customFormula, visualRawFormula]);
+
   /** Compute per-municipality scores */
   const allScores = useMemo(() => {
     if (municipalityCodes.length === 0) return {};
-    return computeAllScores(municipalityCodes, layers, configs, municipalityData);
-  }, [municipalityCodes, layers, configs, municipalityData]);
+    return computeAllScores(
+      municipalityCodes,
+      layers,
+      configs,
+      municipalityData,
+      activeFormula,
+    );
+  }, [municipalityCodes, layers, configs, municipalityData, activeFormula]);
 
   /** Layers used for heatmap rendering — solo mode isolates a single layer. */
   const heatmapLayers = useMemo(() => {
@@ -67,11 +95,17 @@ export default function App() {
   const heatmapScores = useMemo(() => {
     if (municipalityCodes.length === 0) return {};
     if (!soloLayer) return {}; // will use allScores below
-    const solo = computeAllScores(municipalityCodes, heatmapLayers, configs, municipalityData);
+    const solo = computeAllScores(
+      municipalityCodes,
+      heatmapLayers,
+      configs,
+      municipalityData,
+      activeFormula,
+    );
     const flat: Record<string, number> = {};
     for (const [codi, data] of Object.entries(solo)) flat[codi] = data.score;
     return flat;
-  }, [municipalityCodes, heatmapLayers, configs, municipalityData, soloLayer]);
+  }, [municipalityCodes, heatmapLayers, configs, municipalityData, soloLayer, activeFormula]);
 
   /** Flatten to just the composite score for choropleth */
   const scores = useMemo(() => {
@@ -110,7 +144,7 @@ export default function App() {
         loadViewportTiles(w, s, e, n, targetM).then((anyNew) => {
           if (anyNew) setDemFineTileVersion((v) => v + 1);
         });
-      }, 400);
+      }, 600);
     },
     [],
   );
@@ -130,6 +164,19 @@ export default function App() {
    */
   const [demFineTileVersion, setDemFineTileVersion] = useState(0);
 
+  /** Global keyboard shortcut: Ctrl+Z undo, Ctrl+Y / Ctrl+Shift+Z redo. */
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+        if (e.key === 'z' && e.shiftKey)  { e.preventDefault(); redo(); }
+        if (e.key === 'y')                { e.preventDefault(); redo(); }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [undo, redo]);
+
   useEffect(() => {
     // Cancel any pending render
     if (typeof heatmapTimer.current === 'number' && heatmapTimer.current) {
@@ -145,11 +192,27 @@ export default function App() {
       return;
     }
 
+    if (!view.showHeatmap) {
+      setHeatmapDataUrl(null);
+      return;
+    }
+
     // Schedule heatmap render during idle time
     const run = () => {
       const renderScores  = soloLayer ? heatmapScores : scores;
       const renderLayers  = heatmapLayers;
-      const url = renderHeatmapImage(municipalities, renderScores, municipalityData, renderLayers, configs, viewportSpec);
+      const url = renderHeatmapImage(
+        municipalities,
+        renderScores,
+        municipalityData,
+        renderLayers,
+        configs,
+        viewportSpec,
+        {
+          customFormula: activeFormula,
+          disqualifiedMask: view.maskDisqualifiedAsBlack ? 'black' : 'transparent',
+        },
+      );
       if (url) {
         setHeatmapDataUrl(url);
         setHeatmapBounds([viewportSpec.w, viewportSpec.s, viewportSpec.e, viewportSpec.n]);
@@ -171,7 +234,7 @@ export default function App() {
         }
       }
     };
-  }, [municipalities, scores, heatmapScores, heatmapLayers, municipalityData, layers, configs, municipalityCodes, demSlopeVersion, demFineTileVersion, viewportSpec, soloLayer]);
+  }, [municipalities, scores, heatmapScores, heatmapLayers, municipalityData, layers, configs, municipalityCodes, demSlopeVersion, demFineTileVersion, viewportSpec, soloLayer, activeFormula, view.showHeatmap, view.maskDisqualifiedAsBlack]);
 
   /** Compute point-based analysis score when an analysis point is set */
   const pointScore = useMemo(() => {
@@ -219,7 +282,6 @@ export default function App() {
         heatmapBounds={heatmapBounds}
         onViewportChange={handleViewportChange}
       />
-      <Sidebar />
       <MunicipalityInfo scores={scores} municipalityNames={municipalityNames} />
       <PointAnalysisPanel result={pointScore} />
       <FormulaBar />

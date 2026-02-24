@@ -81,43 +81,76 @@ function scorePointLayer(
   pointLon?: number,
   pointLat?: number,
 ): { score: number; disqualified: boolean } | undefined {
+  // ── Helpers for point-level terrain lookups ──────────────────────
+  const getTerrainVals = () => {
+    const realSlope   = (pointLon != null && pointLat != null) ? getSlopeAt(pointLon, pointLat)    : null;
+    const realElev    = (pointLon != null && pointLat != null) ? getElevationAt(pointLon, pointLat) : null;
+    const realAspect  = (pointLon != null && pointLat != null) ? getAspectAt(pointLon, pointLat)   : null;
+    const t = codi ? data.terrain[normalizeIne(codi)] : undefined;
+    return {
+      slopeDeg:   realSlope   ?? t?.avgSlopeDeg,
+      elevationM: realElev    ?? t?.avgElevationM,
+      aspect:     realAspect  ?? t?.dominantAspect ?? 'N',
+    };
+  };
+
   switch (layerId) {
-    case 'terrain': {
-      // Prefer real DEM values at the exact point; fall back to municipal average
-      const realSlope   = (pointLon != null && pointLat != null) ? getSlopeAt(pointLon, pointLat)    : null;
-      const realElev    = (pointLon != null && pointLat != null) ? getElevationAt(pointLon, pointLat) : null;
-      const realAspect  = (pointLon != null && pointLat != null) ? getAspectAt(pointLon, pointLat)   : null;
-
-      const t = codi ? data.terrain[normalizeIne(codi)] : undefined;
-      const slopeDeg   = realSlope   ?? t?.avgSlopeDeg;
-      const elevationM = realElev    ?? t?.avgElevationM;
-      const aspect     = realAspect  ?? t?.dominantAspect ?? 'N';
-
-      if (slopeDeg == null || elevationM == null) return undefined;
-
-      rawValues.slopeDeg   = slopeDeg;
+    case 'terrainSlope': {
+      const { slopeDeg } = getTerrainVals();
+      if (slopeDeg == null) return undefined;
+      rawValues.slopeDeg = slopeDeg;
+      return combineSubScores([scoreSingleTf(slopeDeg, configs.terrain.slope)]);
+    }
+    case 'terrainElevation': {
+      const { elevationM } = getTerrainVals();
+      if (elevationM == null) return undefined;
       rawValues.elevationM = elevationM;
-      const slope = scoreSingleTf(slopeDeg, configs.terrain.slope);
-      const elev  = scoreSingleTf(elevationM, configs.terrain.elevation);
-      const aspectRes = {
-        score: scoreAspect(aspect, configs.terrain.aspect),
-        weight: 1,
-        disqualified: false,
-      };
-      return combineSubScores([slope, elev, aspectRes]);
+      return combineSubScores([scoreSingleTf(elevationM, configs.terrain.elevation)]);
+    }
+    case 'terrainAspect': {
+      const { aspect } = getTerrainVals();
+      return { score: scoreAspect(aspect, configs.terrain.aspect), disqualified: false };
     }
 
-    case 'votes': {
+    case 'votesLeft': {
       const v = codi ? data.votes[codi] : undefined;
       if (!v) return undefined;
-      const terms = configs.votes.terms;
-      if (!terms || terms.length === 0) return undefined;
-      const subs = terms.map((term) => {
-        const raw = v[term.metric] as number | undefined;
-        if (raw !== undefined) rawValues[`vote_${term.metric}`] = raw;
-        return scoreSingleTf(raw, term.value);
-      });
-      return combineSubScores(subs);
+      const term = configs.votes.terms.find((t) => t.metric === 'leftPct');
+      if (!term) return undefined;
+      rawValues.vote_leftPct = v.leftPct;
+      return combineSubScores([scoreSingleTf(v.leftPct, term.value)]);
+    }
+    case 'votesRight': {
+      const v = codi ? data.votes[codi] : undefined;
+      if (!v) return undefined;
+      const term = configs.votes.terms.find((t) => t.metric === 'rightPct');
+      if (!term) return undefined;
+      rawValues.vote_rightPct = v.rightPct;
+      return combineSubScores([scoreSingleTf(v.rightPct, term.value)]);
+    }
+    case 'votesIndep': {
+      const v = codi ? data.votes[codi] : undefined;
+      if (!v) return undefined;
+      const term = configs.votes.terms.find((t) => t.metric === 'independencePct');
+      if (!term) return undefined;
+      rawValues.vote_independencePct = v.independencePct;
+      return combineSubScores([scoreSingleTf(v.independencePct, term.value)]);
+    }
+    case 'votesUnionist': {
+      const v = codi ? data.votes[codi] : undefined;
+      if (!v) return undefined;
+      const term = configs.votes.terms.find((t) => t.metric === 'unionistPct');
+      if (!term) return undefined;
+      rawValues.vote_unionistPct = v.unionistPct;
+      return combineSubScores([scoreSingleTf(v.unionistPct, term.value)]);
+    }
+    case 'votesTurnout': {
+      const v = codi ? data.votes[codi] : undefined;
+      if (!v) return undefined;
+      const term = configs.votes.terms.find((t) => t.metric === 'turnoutPct');
+      if (!term) return undefined;
+      rawValues.vote_turnoutPct = v.turnoutPct;
+      return combineSubScores([scoreSingleTf(v.turnoutPct, term.value)]);
     }
 
     case 'transit':
@@ -133,15 +166,17 @@ function scorePointLayer(
     case 'soil':
       return { score: 0.5, disqualified: false };
 
-    case 'airQuality': {
+    case 'airQualityPm10': {
       const a = codi ? data.airQuality[codi] : undefined;
       if (!a) return undefined;
       if (a.pm10 !== undefined) rawValues.pm10 = a.pm10;
+      return combineSubScores([scoreSingleTf(a.pm10, configs.airQuality.pm10)]);
+    }
+    case 'airQualityNo2': {
+      const a = codi ? data.airQuality[codi] : undefined;
+      if (!a) return undefined;
       if (a.no2 !== undefined) rawValues.no2 = a.no2;
-      return combineSubScores([
-        scoreSingleTf(a.pm10, configs.airQuality.pm10),
-        scoreSingleTf(a.no2, configs.airQuality.no2),
-      ]);
+      return combineSubScores([scoreSingleTf(a.no2, configs.airQuality.no2)]);
     }
 
     case 'crime': {
@@ -169,15 +204,15 @@ function scorePointLayer(
     case 'noise':
       return { score: 0.5, disqualified: false };
 
-    case 'climate': {
+    case 'climateTemp': {
       const temp = climateVals.avgTempC;
-      const rain = climateVals.avgRainfallMm;
       if (temp !== undefined) rawValues.avgTempC = temp;
+      return combineSubScores([scoreSingleTf(temp, configs.climate.temperature)]);
+    }
+    case 'climateRainfall': {
+      const rain = climateVals.avgRainfallMm;
       if (rain !== undefined) rawValues.avgRainfallMm = rain;
-      return combineSubScores([
-        scoreSingleTf(temp, configs.climate.temperature),
-        scoreSingleTf(rain, configs.climate.rainfall),
-      ]);
+      return combineSubScores([scoreSingleTf(rain, configs.climate.rainfall)]);
     }
 
     case 'rentalPrices': {

@@ -20,27 +20,27 @@ describe('useAppStore', () => {
 
   it('has correct default state', () => {
     const state = useAppStore.getState();
-    expect(state.layers).toHaveLength(15);
+    expect(state.layers).toHaveLength(23);
     expect(state.sidebarOpen).toBe(true);
     expect(state.selectedMunicipality).toBeNull();
     expect(state.configs).toBeDefined();
   });
 
   it('toggleLayer flips enabled state', () => {
-    const initialEnabled = useAppStore.getState().layers.find((l) => l.id === 'terrain')!.enabled;
-    useAppStore.getState().toggleLayer('terrain');
-    const newEnabled = useAppStore.getState().layers.find((l) => l.id === 'terrain')!.enabled;
+    const initialEnabled = useAppStore.getState().layers.find((l) => l.id === 'terrainSlope')!.enabled;
+    useAppStore.getState().toggleLayer('terrainSlope');
+    const newEnabled = useAppStore.getState().layers.find((l) => l.id === 'terrainSlope')!.enabled;
     expect(newEnabled).toBe(!initialEnabled);
   });
 
   it('setLayerWeight updates the weight', () => {
-    useAppStore.getState().setLayerWeight('terrain', 1.5);
-    const weight = useAppStore.getState().layers.find((l) => l.id === 'terrain')!.weight;
+    useAppStore.getState().setLayerWeight('terrainSlope', 1.5);
+    const weight = useAppStore.getState().layers.find((l) => l.id === 'terrainSlope')!.weight;
     expect(weight).toBe(1.5);
   });
 
   it('updateConfig replaces a layer config', () => {
-    const newTransit = { enabled: true, tf: defaultTf(2, 15, true, 0.2) };
+    const newTransit = { enabled: true, tf: defaultTf(2, 15, 'sin', 0.2) };
     useAppStore.getState().updateConfig('transit', newTransit);
     const transit = useAppStore.getState().configs.transit;
     expect(transit.tf.plateauEnd).toBe(2);

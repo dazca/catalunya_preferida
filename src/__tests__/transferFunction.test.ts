@@ -13,15 +13,15 @@ import type { TransferFunction, AspectPreferences } from '../types/transferFunct
 function makeTf(
   plateauEnd: number,
   decayEnd: number,
-  invert = false,
+  shape: TransferFunction['shape'] = 'sin',
   floor = 0,
 ): TransferFunction {
-  return { plateauEnd, decayEnd, floor, mandatory: false, multiplier: 1, invert };
+  return { plateauEnd, decayEnd, floor, mandatory: false, multiplier: 1, shape };
 }
 
 describe('evaluateTransferFunction', () => {
   describe('non-inverted (higher input = worse)', () => {
-    const tf = makeTf(10, 30, false, 0);
+    const tf = makeTf(10, 30, 'sin', 0);
 
     it('returns 1.0 at plateau (input <= plateauEnd)', () => {
       expect(evaluateTransferFunction(0, tf)).toBe(1.0);
@@ -50,7 +50,7 @@ describe('evaluateTransferFunction', () => {
   });
 
   describe('non-inverted with floor > 0', () => {
-    const tf = makeTf(5, 25, false, 0.2);
+    const tf = makeTf(5, 25, 'sin', 0.2);
 
     it('returns 1.0 at plateau', () => {
       expect(evaluateTransferFunction(3, tf)).toBe(1.0);
@@ -69,7 +69,7 @@ describe('evaluateTransferFunction', () => {
   });
 
   describe('inverted (lower input = better)', () => {
-    const tf = makeTf(5, 25, true, 0);
+    const tf = makeTf(5, 25, 'sin', 0);
 
     it('returns 1.0 when input <= plateauEnd', () => {
       expect(evaluateTransferFunction(0, tf)).toBe(1.0);

@@ -19,12 +19,13 @@ import type { MunicipalityCollection } from '../types';
 import type { LayerMeta } from '../types';
 import type { LayerConfigs } from '../types/transferFunction';
 import type { MunicipalityData } from './scorer';
-import { computeNonTerrainCached, evaluateTerrainPixel } from './scorer';
+import { computeNonTerrainCached, evaluateTerrainPixels, TERRAIN_SUB_IDS, isDisqualified, isNonTerrainDisqualified, isTerrainDisqualifiedPixel, buildRawFormulaValues } from './scorer';
 import type { NonTerrainCached } from './scorer';
 import { scoreToRgba } from './turboColormap';
 import { pointInPolygon } from './spatial';
 import { sampleDemViewport, isDemLoaded, DEM_ASPECT_LABELS } from './demSlope';
 import type { DemViewportSamples } from './demSlope';
+import { compileFormulaForBatch, normalizeFormulaValueKeys } from './formulaEngine';
 
 /* ------------------------------------------------------------------ */
 /*  ViewportSpec                                                      */
@@ -62,6 +63,18 @@ export const CATALONIA_VIEWPORT: ViewportSpec = {
  */
 const MEMBER_MAX_COLS = 256;
 const MEMBER_MAX_ROWS = 192;
+const DISQUALIFIED_MASK_SCORE = -2;
+
+/**
+ * Maximum heatmap pixel dimension.  Capped at 512 to keep the synchronous
+ * render under ~300 ms on mid-range hardware (was 1024, causing 0.2 FPS).
+ */
+const MAX_HEATMAP_DIM = 512;
+
+export interface HeatmapRenderOptions {
+  disqualifiedMask?: 'black' | 'transparent';
+  customFormula?: string;
+}
 
 /**
  * Compute an appropriate ViewportSpec for a given geographic viewport and
@@ -93,7 +106,7 @@ export function viewportSpecForZoom(
   // Target metres per heatmap pixel — halves each zoom step
   const targetM = Math.max(5, Math.min(800, Math.round(4_000 / Math.pow(2, zoom - 8))));
 
-  const MAX = 1024;
+  const MAX = MAX_HEATMAP_DIM;
   const MIN_COLS = 100;
   const MIN_ROWS = 75;
 
@@ -228,6 +241,7 @@ export function renderHeatmapImage(
   layers: LayerMeta[],
   configs: LayerConfigs,
   spec: ViewportSpec = CATALONIA_VIEWPORT,
+  options: HeatmapRenderOptions = {},
 ): string | null {
   if (!municipalities || municipalities.features.length === 0) return null;
   if (Object.keys(scores).length === 0) return null;
@@ -235,27 +249,53 @@ export function renderHeatmapImage(
   const { w, s, e, n, cols, rows } = spec;
   const features = municipalities.features;
   const enabledLayers = layers.filter((l) => l.enabled);
-  const terrainLayer = enabledLayers.find((l) => l.id === 'terrain');
-  const useDem = isDemLoaded() && !!terrainLayer;
+  const terrainSubLayers = enabledLayers.filter((l) => TERRAIN_SUB_IDS.has(l.id));
+  const useDem = isDemLoaded() && terrainSubLayers.length > 0;
+  const useCustomFormula = !!options.customFormula?.trim();
+  const disqualifiedMask = options.disqualifiedMask ?? 'black';
 
-  // ── Per-municipality fallback scores ───────────────────────────────
+  // ── Per-municipality fallback scores + disqualification ─────────────
+  // Uses early-exit isDisqualified() instead of full computeScore() to
+  // avoid computing weighted averages we don't need.
   const featureScores = new Float32Array(features.length).fill(-1);
+  const featureDisqualified = new Uint8Array(features.length);
   for (let i = 0; i < features.length; i++) {
     const codi = features[i].properties?.codi;
-    if (codi && scores[codi] !== undefined) featureScores[i] = scores[codi];
+    if (!codi || scores[codi] === undefined) continue;
+    featureScores[i] = scores[codi];
+    featureDisqualified[i] = isDisqualified(codi, enabledLayers, configs, municipalityData) ? 1 : 0;
   }
 
-  // ── Pre-compute non-terrain composite once per feature ─────────────
+  // ── Pre-compute per-feature caches (terrain vs custom-formula paths)
   let nonTerrainByFeature: NonTerrainCached[] | null = null;
+  // Custom formula batch-eval caches (pre-built per municipality)
+  let compiledFormula: ((values: Record<string, number>) => number) | null = null;
+  let featureNonTerrainDisq: Uint8Array | null = null;
+  let featureNormValues: Record<string, number>[] | null = null;
+
   if (useDem) {
-    nonTerrainByFeature = features.map((f) =>
-      computeNonTerrainCached(
-        f.properties?.codi ?? '',
-        enabledLayers,
-        configs,
-        municipalityData,
-      ),
-    );
+    if (useCustomFormula) {
+      // ── Custom formula path: pre-build normalised values + disqualification
+      // per municipality once, so the pixel loop only mutates terrain fields.
+      compiledFormula = compileFormulaForBatch(options.customFormula!);
+      featureNonTerrainDisq = new Uint8Array(features.length);
+      featureNormValues = new Array(features.length);
+      for (let i = 0; i < features.length; i++) {
+        const codi = features[i].properties?.codi ?? '';
+        featureNonTerrainDisq[i] = isNonTerrainDisqualified(codi, enabledLayers, configs, municipalityData) ? 1 : 0;
+        featureNormValues[i] = normalizeFormulaValueKeys(buildRawFormulaValues(codi, municipalityData));
+      }
+    } else {
+      // ── Standard DEM path: pre-compute non-terrain weighted composites
+      nonTerrainByFeature = features.map((f) =>
+        computeNonTerrainCached(
+          f.properties?.codi ?? '',
+          enabledLayers,
+          configs,
+          municipalityData,
+        ),
+      );
+    }
   }
 
   // ── Membership grid capped at MEMBER_MAX_COLS × MEMBER_MAX_ROWS ─────
@@ -282,23 +322,50 @@ export function renderHeatmapImage(
       const fi = grid[mIdx];
       if (fi < 0 || featureScores[fi] < 0) continue;
 
-      if (demSamples && nonTerrainByFeature && demSamples.hasData[idx]) {
-        const t  = evaluateTerrainPixel(
-          demSamples.slopes[idx],
-          demSamples.elevations[idx],
-          DEM_ASPECT_LABELS[demSamples.aspects[idx]],
-          terrainLayer!.weight,
-          configs,
-        );
-        const nt = nonTerrainByFeature[fi];
-        const totalWeighted = nt.weightedSum + t.contrib;
-        const totalWeight   = nt.totalWeight  + t.weight;
-        const disqualified  = nt.disqualified  || t.disqualified;
-        cellScores[idx] = disqualified
-          ? 0
-          : totalWeight > 0 ? totalWeighted / totalWeight : 0;
+      // ── DEM pixel path ───────────────────────────────────────────
+      if (demSamples && demSamples.hasData[idx]) {
+        if (useCustomFormula && compiledFormula && featureNormValues && featureNonTerrainDisq) {
+          // Fast custom-formula path: skip per-pixel scorer loops.
+          // Non-terrain disqualification is cached per municipality;
+          // terrain disqualification checked with 2-3 TF evals only.
+          if (featureNonTerrainDisq[fi]) {
+            cellScores[idx] = DISQUALIFIED_MASK_SCORE;
+          } else if (isTerrainDisqualifiedPixel(demSamples.slopes[idx], demSamples.elevations[idx], terrainSubLayers, configs)) {
+            cellScores[idx] = DISQUALIFIED_MASK_SCORE;
+          } else {
+            // Mutate the pre-built values object with per-pixel terrain data
+            const vals = featureNormValues[fi];
+            vals.slope = vals.terrainslope = demSamples.slopes[idx];
+            vals.elevation = vals.terrainelevation = demSamples.elevations[idx];
+            cellScores[idx] = compiledFormula(vals);
+          }
+        } else if (nonTerrainByFeature) {
+          // Standard DEM path — terrain TFs + non-terrain cached composite
+          const t  = evaluateTerrainPixels(
+            demSamples.slopes[idx],
+            demSamples.elevations[idx],
+            DEM_ASPECT_LABELS[demSamples.aspects[idx]],
+            terrainSubLayers,
+            configs,
+          );
+          const nt = nonTerrainByFeature[fi];
+          const totalWeighted = nt.weightedSum + t.weightedSum;
+          const totalWeight   = nt.totalWeight  + t.totalWeight;
+          const disqualified  = nt.disqualified  || t.disqualified;
+          cellScores[idx] = disqualified
+            ? DISQUALIFIED_MASK_SCORE
+            : totalWeight > 0 ? totalWeighted / totalWeight : 0;
+        } else {
+          // DEM available but neither path applies — use fallback
+          cellScores[idx] = featureDisqualified[fi]
+            ? DISQUALIFIED_MASK_SCORE
+            : featureScores[fi];
+        }
       } else {
-        cellScores[idx] = featureScores[fi];
+        // ── No DEM data for this pixel — use municipality average ───
+        cellScores[idx] = featureDisqualified[fi]
+          ? DISQUALIFIED_MASK_SCORE
+          : featureScores[fi];
       }
     }
   }
@@ -326,6 +393,18 @@ export function renderHeatmapImage(
     const off = i * 4;
     const raw = cellScores[i];
 
+    if (raw === DISQUALIFIED_MASK_SCORE) {
+      if (disqualifiedMask === 'black') {
+        pixels[off] = 0;
+        pixels[off + 1] = 0;
+        pixels[off + 2] = 0;
+        pixels[off + 3] = 230;
+      } else {
+        pixels[off + 3] = 0;
+      }
+      continue;
+    }
+
     if (raw < 0) {
       pixels[off + 3] = 0;
       continue;
@@ -341,7 +420,8 @@ export function renderHeatmapImage(
 
   ctx.putImageData(imageData, 0, 0);
   // WebP encodes 5–10× faster than PNG and produces smaller payloads.
-  // Falls back gracefully: if the browser returns 'image/png' the data is still valid.
-  return canvas.toDataURL('image/webp', 0.85);
+  // Quality 0.65 is ~30 % faster to encode than 0.85 with imperceptible
+  // visual difference on a heatmap overlay.
+  return canvas.toDataURL('image/webp', 0.65);
 }
 

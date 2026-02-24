@@ -1,13 +1,12 @@
 /**
  * @file TransferFunction evaluator and DataStats computation.
  *
- * Core math for the sinusoidal decay curve:
- *   input <= plateauEnd → 1.0
- *   plateauEnd < input < decayEnd → floor + (1-floor) * 0.5 * (1 + cos(π·t))
- *   input >= decayEnd → floor
+ * Core math for each shape (M = plateauEnd, N = decayEnd):
  *
- * When `invert` is true, the input axis is flipped so lower values yield
- * higher scores (used for distance, cost, pollution metrics).
+ *   sin:      ≤M→1, M→N half-cosine decay→floor, ≥N→floor
+ *   invsin:   ≤M→floor, M→N half-cosine rise→1, ≥N→1
+ *   range:    ≤M→1, M→N linear decay→floor, ≥N→floor
+ *   invrange: ≤M→floor, M→N linear rise→1, ≥N→1
  */
 import type { TransferFunction, DataStats, AspectPreferences } from '../types/transferFunction';
 
@@ -19,32 +18,41 @@ import type { TransferFunction, DataStats, AspectPreferences } from '../types/tr
  * @returns Score in [floor, 1.0]
  */
 export function evaluateTransferFunction(input: number, tf: TransferFunction): number {
-  const { plateauEnd, decayEnd, floor, invert } = tf;
+  const { plateauEnd: M, decayEnd: N, floor, shape } = tf;
+  const high = 1.0;
+  const low = floor;
+  const span = N - M;
 
-  // Invert: flip so that lower raw values get higher scores
-  let x = input;
-  if (invert) {
-    x = decayEnd - (input - plateauEnd);
-    // After inversion, the effective curve is:
-    //   input <= plateauEnd → high score (mapped to decayEnd side)
-    //   input >= decayEnd → low score (mapped to plateauEnd side)
-    // Simplify: just swap effective boundaries
+  if (Math.abs(span) < 1e-9) {
+    // Degenerate: M ≈ N
+    const isInv = shape === 'invsin' || shape === 'invrange';
+    return isInv ? (input >= N ? high : low) : (input <= M ? high : low);
   }
 
-  // Normalize for the sinusoidal curve (non-inverted logic)
-  if (!invert) {
-    if (x <= plateauEnd) return 1.0;
-    if (x >= decayEnd) return floor;
-    const t = (x - plateauEnd) / (decayEnd - plateauEnd);
-    return floor + (1 - floor) * 0.5 * (1 + Math.cos(Math.PI * t));
-  }
+  const t = Math.max(0, Math.min(1, (input - M) / span)); // 0 at M, 1 at N
 
-  // Inverted: lower input = better. plateauEnd is the "good" threshold,
-  // decayEnd is the "bad" threshold. We compute t based on original input.
-  if (input <= plateauEnd) return 1.0;
-  if (input >= decayEnd) return floor;
-  const t = (input - plateauEnd) / (decayEnd - plateauEnd);
-  return floor + (1 - floor) * 0.5 * (1 + Math.cos(Math.PI * t));
+  switch (shape) {
+    case 'sin':
+    default:
+      if (input <= M) return high;
+      if (input >= N) return low;
+      return low + (high - low) * 0.5 * (1 + Math.cos(Math.PI * t));
+
+    case 'invsin':
+      if (input <= M) return low;
+      if (input >= N) return high;
+      return low + (high - low) * 0.5 * (1 - Math.cos(Math.PI * t));
+
+    case 'range':
+      if (input <= M) return high;
+      if (input >= N) return low;
+      return high - (high - low) * t;
+
+    case 'invrange':
+      if (input <= M) return low;
+      if (input >= N) return high;
+      return low + (high - low) * t;
+  }
 }
 
 /**

@@ -69,7 +69,7 @@ describe('computeScore', () => {
     // Forest TF: non-inverted, plateauEnd=10, decayEnd=80 — 60% is well within decay zone
     const configs: LayerConfigs = {
       ...DEFAULT_LAYER_CONFIGS,
-      forest: { enabled: true, tf: defaultTf(10, 80, false, 0) },
+      forest: { enabled: true, tf: defaultTf(10, 80, 'sin', 0) },
     };
 
     const result = computeScore('08001', layers, configs, data);
@@ -92,7 +92,7 @@ describe('computeScore', () => {
     // Inverted TF: plateauEnd=5, decayEnd=50 — rate 10 is early in decay, should be high
     const configs: LayerConfigs = {
       ...DEFAULT_LAYER_CONFIGS,
-      crime: { enabled: true, tf: defaultTf(5, 50, true, 0) },
+      crime: { enabled: true, tf: defaultTf(5, 50, 'sin', 0) },
     };
 
     const result = computeScore('08001', layers, configs, data);
@@ -110,7 +110,7 @@ describe('computeScore', () => {
       ...DEFAULT_LAYER_CONFIGS,
       transit: {
         enabled: true,
-        tf: { plateauEnd: 5, decayEnd: 25, floor: 0, mandatory: true, multiplier: 1, invert: true },
+        tf: { plateauEnd: 5, decayEnd: 25, floor: 0, mandatory: true, multiplier: 1, shape: 'sin' },
       },
     };
 
@@ -131,8 +131,8 @@ describe('computeScore', () => {
     // Forest at 5%: below plateauEnd=10 → full score=1.0
     const configs: LayerConfigs = {
       ...DEFAULT_LAYER_CONFIGS,
-      forest: { enabled: true, tf: defaultTf(10, 80, false, 0) },
-      transit: { enabled: true, tf: defaultTf(5, 25, true, 0) },
+      forest: { enabled: true, tf: defaultTf(10, 80, 'sin', 0) },
+      transit: { enabled: true, tf: defaultTf(5, 25, 'sin', 0) },
     };
 
     const result = computeScore('08001', layers, configs, data);
@@ -152,7 +152,7 @@ describe('computeAllScores', () => {
     ];
     const configs: LayerConfigs = {
       ...DEFAULT_LAYER_CONFIGS,
-      forest: { enabled: true, tf: defaultTf(10, 80, false, 0) },
+      forest: { enabled: true, tf: defaultTf(10, 80, 'sin', 0) },
     };
 
     const result = computeAllScores(['08001', '08002'], layers, configs, data);

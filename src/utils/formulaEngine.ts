@@ -1,0 +1,436 @@
+/**
+ * @file Formula engine — deterministic Visual→Raw formula generation and
+ *       Raw formula compilation/evaluation.
+ *
+ * ## Design
+ *
+ * The scoring formula is always a function of known variables.  Units are
+ * implicit (degrees, %, km, etc.) and never appear in the formula text.
+ *
+ * ### Syntax elements
+ *
+ * - **Variables**: bare identifiers like `slope`, `elevation`, `transit`.
+ * - **SIN(var, M, N [, high, low])**: sinusoidal decay, ≤M→high, ≥N→low
+ * - **INVSIN(var, M, N [, high, low])**: sinusoidal rise, ≤M→low, ≥N→high
+ * - **RANGE(var, M, N [, high, low])**: linear decay, ≤M→high, ≥N→low
+ * - **INVRANGE(var, M, N [, high, low])**: linear rise, ≤M→low, ≥N→high
+ * - **Operators**: `+  -  *  /  >  <  >=  <=  ==`
+ * - **Parentheses**: `(  )` for grouping.  `[  ]` are auto-converted to `( )`.
+ *
+ * high defaults to 1, low defaults to 0.
+ *
+ * ### Bijective Visual↔Raw
+ *
+ * - **Visual → Raw** (`visualToRawFormula`): reads enabled layers, weights,
+ *   transfer-function configs and mandatory constraints to produce a canonical
+ *   formula string.  This is deterministic and lossless.
+ *
+ * - **Raw → Visual**: switching to Visual mode simply discards the raw text
+ *   and rebuilds from the live layers+configs (which remain the source of
+ *   truth).  The user can *always* go back to Visual — no parsing needed.
+ */
+import type { LayerMeta, LayerId } from '../types';
+import type {
+  LayerConfigs,
+  TransferFunction,
+  TfShape,
+  VoteMetric,
+} from '../types/transferFunction';
+
+/* ── Variable name mapping ──────────────────────────────────────────── */
+
+/** Canonical variable name for each sub-layer ID. */
+export const LAYER_VAR: Record<string, string> = {
+  terrainSlope:    'slope',
+  terrainElevation:'elevation',
+  terrainAspect:   'aspect',
+  votesLeft:       'votesLeft',
+  votesRight:      'votesRight',
+  votesIndep:      'votesIndep',
+  votesUnionist:   'votesUnionist',
+  votesTurnout:    'votesTurnout',
+  transit:         'transit',
+  forest:          'forest',
+  soil:            'soil',
+  airQualityPm10:  'airPm10',
+  airQualityNo2:   'airNo2',
+  crime:           'crime',
+  healthcare:      'healthcare',
+  schools:         'schools',
+  internet:        'internet',
+  noise:           'noise',
+  climateTemp:     'climateTemp',
+  climateRainfall: 'climateRain',
+  rentalPrices:    'rentalPrices',
+  employment:      'employment',
+  amenities:       'amenities',
+};
+
+/* ── Vote metric map ────────────────────────────────────────────────── */
+
+const VOTE_ID_TO_METRIC: Record<string, VoteMetric> = {
+  votesLeft:     'leftPct',
+  votesRight:    'rightPct',
+  votesIndep:    'independencePct',
+  votesUnionist: 'unionistPct',
+  votesTurnout:  'turnoutPct',
+};
+
+/* ── Helpers ────────────────────────────────────────────────────────── */
+
+/** Number formatting: strip trailing zeros but keep up to 4 decimal places. */
+function fmtNum(n: number): string {
+  return Number.isInteger(n) ? String(n) : parseFloat(n.toFixed(4)).toString();
+}
+
+/**
+ * Get the "primary" TransferFunction for a layer.
+ * Returns null for layers without a single TF (e.g. aspect).
+ */
+export function layerTf(id: LayerId, configs: LayerConfigs): TransferFunction | null {
+  switch (id) {
+    case 'terrainSlope':     return configs.terrain.slope.tf;
+    case 'terrainElevation': return configs.terrain.elevation.tf;
+    case 'terrainAspect':    return null;
+    case 'votesLeft':
+    case 'votesRight':
+    case 'votesIndep':
+    case 'votesUnionist':
+    case 'votesTurnout': {
+      const metric = VOTE_ID_TO_METRIC[id];
+      return configs.votes.terms.find((t) => t.metric === metric)?.value.tf ?? null;
+    }
+    case 'transit':         return configs.transit.tf;
+    case 'forest':          return configs.forest.tf;
+    case 'airQualityPm10':  return configs.airQuality.pm10.tf;
+    case 'airQualityNo2':   return configs.airQuality.no2.tf;
+    case 'crime':           return configs.crime.tf;
+    case 'healthcare':      return configs.healthcare.tf;
+    case 'schools':         return configs.schools.tf;
+    case 'internet':        return configs.internet.tf;
+    case 'climateTemp':     return configs.climate.temperature.tf;
+    case 'climateRainfall': return configs.climate.rainfall.tf;
+    case 'rentalPrices':    return configs.rentalPrices.tf;
+    case 'employment':      return configs.employment.tf;
+    case 'amenities':       return configs.amenities.tf;
+    default:                return null;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Visual → Raw formula generation
+   ══════════════════════════════════════════════════════════════════════ */
+
+/** Map TfShape to its formula function name. */
+const SHAPE_FN: Record<TfShape, string> = {
+  sin: 'SIN',
+  invsin: 'INVSIN',
+  range: 'RANGE',
+  invrange: 'INVRANGE',
+};
+
+/**
+ * Build the canonical raw formula string from the current visual state.
+ *
+ * Structure:
+ *   guard1 * guard2 * ... *
+ *   (w1 * FN(var1, M, N, 1, floor) + w2 * FN(var2, M, N, 1, floor) + ...) / totalWeight
+ *
+ * This exactly mirrors the visual scoring pipeline:
+ *   Σ(evaluateTransferFunction(value_i, tf_i) * weight_i) / Σ(weight_i)
+ */
+export function visualToRawFormula(
+  enabledLayers: LayerMeta[],
+  configs: LayerConfigs,
+): string {
+  const constraints: string[] = [];
+  const terms: string[] = [];
+  let totalWeight = 0;
+
+  for (const layer of enabledLayers) {
+    const varName = LAYER_VAR[layer.id];
+    if (!varName) continue;
+
+    const tf = layerTf(layer.id, configs);
+    if (!tf) continue; // e.g. aspect — skip
+
+    const shape = tf.shape ?? 'sin';
+    const fn = SHAPE_FN[shape];
+    const isInv = shape === 'invsin' || shape === 'invrange';
+
+    // Mandatory constraint guard
+    if (tf.mandatory) {
+      // Descending: disqualified when value >= decayEnd → guard (var < N)
+      // Ascending: disqualified when value <= plateauEnd → guard (var > M)
+      if (isInv) {
+        constraints.push(`(${varName} > ${fmtNum(tf.plateauEnd)})`);
+      } else {
+        constraints.push(`(${varName} < ${fmtNum(tf.decayEnd)})`);
+      }
+    }
+
+    // Build function call: FN(var, M, N [, 1, floor])
+    const args = [varName, fmtNum(tf.plateauEnd), fmtNum(tf.decayEnd)];
+    if (tf.floor !== 0) {
+      args.push('1', fmtNum(tf.floor));
+    }
+    const call = `${fn}(${args.join(', ')})`;
+
+    const w = fmtNum(layer.weight);
+    terms.push(`${w} * ${call}`);
+    totalWeight += layer.weight;
+  }
+
+  if (terms.length === 0) return '0';
+
+  const sumPart = terms.length === 1 ? terms[0] : terms.join(' + ');
+  const tw = fmtNum(totalWeight);
+  const normalized = totalWeight === 1 ? sumPart : `(${sumPart}) / ${tw}`;
+
+  if (constraints.length === 0) return normalized;
+
+  return constraints.join(' * ') + ' * ' + (totalWeight === 1 ? normalized : `(${normalized})`);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   DEFAULT formula
+   ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Empty default — Visual mode always re-generates from live layers+configs.
+ * A non-empty string is only stored when the user switches to Raw mode.
+ */
+export const DEFAULT_CUSTOM_FORMULA = '';
+
+/* ══════════════════════════════════════════════════════════════════════
+   Raw formula compilation & evaluation
+   ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Runtime transfer-function implementations for formula evaluation.
+ * Each accepts (value, M, N, high?, low?) → score.
+ * Also tolerates (stringName, M, N, ...) for legacy compatibility.
+ */
+type TfFn = (valueOrName: number | string, M: number, N: number, high?: number, low?: number) => number;
+
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+function sinFn(v: number, M: number, N: number, high = 1, low = 0): number {
+  if (!Number.isFinite(v)) return low;
+  if (v <= M) return high;
+  if (v >= N) return low;
+  const t = (v - M) / (N - M);
+  return low + (high - low) * 0.5 * (1 + Math.cos(Math.PI * t));
+}
+
+function invsinFn(v: number, M: number, N: number, high = 1, low = 0): number {
+  if (!Number.isFinite(v)) return low;
+  if (v <= M) return low;
+  if (v >= N) return high;
+  const t = (v - M) / (N - M);
+  return low + (high - low) * 0.5 * (1 - Math.cos(Math.PI * t));
+}
+
+function rangeFn(v: number, M: number, N: number, high = 1, low = 0): number {
+  if (!Number.isFinite(v)) return low;
+  if (v <= M) return high;
+  if (v >= N) return low;
+  const t = (v - M) / (N - M);
+  return high - (high - low) * t;
+}
+
+function invrangeFn(v: number, M: number, N: number, high = 1, low = 0): number {
+  if (!Number.isFinite(v)) return low;
+  if (v <= M) return low;
+  if (v >= N) return high;
+  const t = (v - M) / (N - M);
+  return low + (high - low) * t;
+}
+
+type CompiledFormulaFn = (
+  VAR: (name: string) => number,
+  SIN: TfFn,
+  INVSIN: TfFn,
+  RANGE: TfFn,
+  INVRANGE: TfFn,
+) => unknown;
+
+const COMPILED_CACHE = new Map<string, CompiledFormulaFn>();
+
+/** Strip leading "Score=" or "score =" prefix the user may type. */
+export function normalizeUserFormulaInput(formula: string): string {
+  return formula.trim().replace(/^\s*score\s*=\s*/i, '');
+}
+
+const _nameCache = new Map<string, string>();
+function normalizeName(name: string): string {
+  let cached = _nameCache.get(name);
+  if (cached !== undefined) return cached;
+  cached = name.replace(/[^a-z0-9]/gi, '').toLowerCase();
+  _nameCache.set(name, cached);
+  return cached;
+}
+
+function tokenToNumber(token: string): number {
+  const cleaned = token.replace(/[^0-9+\-\.eE]/g, '');
+  const parsed = Number.parseFloat(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return clamp(value, 0, 1);
+}
+
+/**
+ * Normalise raw formula source into evaluable JS.
+ *
+ * Steps:
+ *   1. Strip "Score =" prefix
+ *   2. Convert `[` / `]` → `(` / `)`
+ *   3. Convert GT / LT / Eq text operators
+ *   4. Strip unit suffixes (º, %, km, etc.) — legacy tolerance
+ *   5. Convert legacy `Var(min X, max Y)` → `RANGE(VAR("var"), X, Y)`
+ *   6. Wrap bare identifiers with `VAR("name")`
+ */
+function normalizeFormulaSource(formula: string): string {
+  let source = formula.trim();
+  source = source.replace(/^\s*score\s*=\s*/i, '');
+  source = source.replace(/\[/g, '(').replace(/\]/g, ')');
+  source = source.replace(/\bGT\b/gi, '>').replace(/\bLT\b/gi, '<').replace(/\bEq\b/gi, '==');
+
+  // Strip unit suffixes (legacy tolerance)
+  source = source.replace(
+    /(\d+(?:\.\d+)?)(?:\s*(?:º|°|%|km|mm|cm|m|ug\/m3|ug\/m³|eur|€|c|°c|\/1k))/gi,
+    '$1',
+  );
+
+  // Legacy: Var(minX, maxY) → RANGE(VAR("var"), X, Y)
+  source = source.replace(
+    /([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*min\s*([^,\)]+)\s*,\s*max\s*([^\)]+)\s*\)/gi,
+    (_match, variable: string, minToken: string, maxToken: string) => {
+      const minValue = tokenToNumber(minToken);
+      const maxValue = tokenToNumber(maxToken);
+      return `RANGE(VAR("${variable}"),${minValue},${maxValue})`;
+    },
+  );
+
+  // Wrap bare identifiers with VAR("name") — skip reserved function names
+  const reserved = new Set(['SIN', 'INVSIN', 'RANGE', 'INVRANGE', 'VAR', 'Math', 'true', 'false', 'null', 'undefined']);
+  source = source.replace(/\b([A-Za-z_][A-Za-z0-9_]*)\b(?!\s*\()/g, (match, name: string) => {
+    if (reserved.has(name)) return match;
+    return `VAR("${name}")`;
+  });
+
+  return source;
+}
+
+function getCompiledFormula(normalizedInput: string): CompiledFormulaFn {
+  const key = normalizedInput;
+  const cached = COMPILED_CACHE.get(key);
+  if (cached) return cached;
+  const normalizedSource = normalizeFormulaSource(normalizedInput);
+  const compiled = new Function('VAR', 'SIN', 'INVSIN', 'RANGE', 'INVRANGE', `return (${normalizedSource});`) as CompiledFormulaFn;
+  COMPILED_CACHE.set(key, compiled);
+  return compiled;
+}
+
+/* ── Validation ─────────────────────────────────────────────────────── */
+
+export interface FormulaValidationResult {
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * Validate a raw formula string.  Empty formulas are considered valid
+ * (they simply mean "use visual mode scoring").
+ */
+export function validateCustomFormula(formula: string): FormulaValidationResult {
+  const normalizedInput = normalizeUserFormulaInput(formula);
+  if (!normalizedInput.trim()) return { ok: true }; // empty = visual mode
+  try {
+    const noop: TfFn = () => 0;
+    const fn = getCompiledFormula(normalizedInput);
+    fn(() => 0, noop, noop, noop, noop);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Invalid formula' };
+  }
+}
+
+/* ── Evaluation ─────────────────────────────────────────────────────── */
+
+export type FormulaValueMap = Record<string, number | undefined>;
+
+/** Pre-normalise value keys for batch evaluation. */
+export function normalizeFormulaValueKeys(raw: FormulaValueMap): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (value == null || !Number.isFinite(value)) continue;
+    result[normalizeName(key)] = value;
+  }
+  return result;
+}
+
+/** Build the runtime TF functions that resolve variable names from a values map. */
+function buildRuntimeFns(values: Record<string, number>) {
+  const resolve = (vOrName: number | string): number =>
+    typeof vOrName === 'string' ? (values[normalizeName(vOrName)] ?? 0) : vOrName;
+
+  const SIN: TfFn = (v, M, N, h, l) => sinFn(resolve(v), M, N, h, l);
+  const INVSIN: TfFn = (v, M, N, h, l) => invsinFn(resolve(v), M, N, h, l);
+  const RANGE: TfFn = (v, M, N, h, l) => rangeFn(resolve(v), M, N, h, l);
+  const INVRANGE: TfFn = (v, M, N, h, l) => invrangeFn(resolve(v), M, N, h, l);
+
+  return { SIN, INVSIN, RANGE, INVRANGE };
+}
+
+/**
+ * Pre-compile a formula for fast repeated evaluation in a pixel loop.
+ */
+export function compileFormulaForBatch(
+  formula: string,
+): ((values: Record<string, number>) => number) | null {
+  const normalizedInput = normalizeUserFormulaInput(formula);
+  if (!normalizedInput.trim()) return null;
+  try {
+    const noop: TfFn = () => 0;
+    const fn = getCompiledFormula(normalizedInput);
+    fn(() => 0, noop, noop, noop, noop); // validation dry-run
+    return (values: Record<string, number>): number => {
+      try {
+        const VAR = (name: string): number => values[normalizeName(name)] ?? 0;
+        const { SIN, INVSIN, RANGE, INVRANGE } = buildRuntimeFns(values);
+        const output = fn(VAR, SIN, INVSIN, RANGE, INVRANGE);
+        const numeric = typeof output === 'boolean' ? (output ? 1 : 0) : Number(output);
+        return clamp01(numeric);
+      } catch { return 0; }
+    };
+  } catch { return null; }
+}
+
+export function evaluateCustomFormula(formula: string, rawValues: FormulaValueMap): number {
+  const normalizedInput = normalizeUserFormulaInput(formula);
+  if (!normalizedInput.trim()) return 0;
+
+  const normalizedValues: Record<string, number> = {};
+  for (const [key, value] of Object.entries(rawValues)) {
+    if (value == null || !Number.isFinite(value)) continue;
+    normalizedValues[normalizeName(key)] = value;
+  }
+
+  const VAR = (name: string): number => normalizedValues[normalizeName(name)] ?? 0;
+  const { SIN, INVSIN, RANGE, INVRANGE } = buildRuntimeFns(normalizedValues);
+
+  try {
+    const fn = getCompiledFormula(normalizedInput);
+    const output = fn(VAR, SIN, INVSIN, RANGE, INVRANGE);
+    const numeric = typeof output === 'boolean' ? (output ? 1 : 0) : Number(output);
+    return clamp01(numeric);
+  } catch {
+    return 0;
+  }
+}

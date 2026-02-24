@@ -177,12 +177,16 @@ function TfControls({
         </label>
 
         <label className="tf-flag">
-          <input
-            type="checkbox"
-            checked={ltc.tf.invert}
-            onChange={(e) => updateTf({ ...ltc.tf, invert: e.target.checked })}
-          />
-          {t('tf.inv')}
+          <select
+            value={ltc.tf.shape ?? 'sin'}
+            onChange={(e) => updateTf({ ...ltc.tf, shape: e.target.value as TransferFunction['shape'] })}
+            className="tf-shape-select"
+          >
+            <option value="sin">SIN</option>
+            <option value="invsin">INVSIN</option>
+            <option value="range">RANGE</option>
+            <option value="invrange">INVRANGE</option>
+          </select>
         </label>
       </div>
 
@@ -237,7 +241,7 @@ function VoteTermsEditor({
     const id = `v${Date.now()}`;
     onChange([
       ...terms,
-      { id, metric: next.metric, value: { enabled: true, tf: { plateauEnd: 0, decayEnd: 100, floor: 0, mandatory: false, multiplier: 1, invert: false } } },
+      { id, metric: next.metric, value: { enabled: true, tf: { plateauEnd: 0, decayEnd: 100, floor: 0, mandatory: false, multiplier: 1, shape: 'sin' } } },
     ]);
   };
 
@@ -296,7 +300,7 @@ function FilterControls({
   configs,
   updateConfig,
 }: {
-  layerId: LayerMeta['id'];
+  layerId: LayerMeta['id'] | 'terrain' | 'votes' | 'airQuality' | 'climate';
   configs: LayerConfigs;
   updateConfig: <K extends keyof LayerConfigs>(layer: K, values: LayerConfigs[K]) => void;
 }) {

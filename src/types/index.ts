@@ -3,20 +3,28 @@
  */
 import type { FeatureCollection, Feature, Point, Polygon, MultiPolygon } from 'geojson';
 
-/** Identifiers for all available data layers */
+/** Identifiers for all available data layers (each sub-metric is its own layer). */
 export type LayerId =
-  | 'terrain'
-  | 'votes'
+  | 'terrainSlope'
+  | 'terrainElevation'
+  | 'terrainAspect'
+  | 'votesLeft'
+  | 'votesRight'
+  | 'votesIndep'
+  | 'votesUnionist'
+  | 'votesTurnout'
   | 'transit'
   | 'forest'
   | 'soil'
-  | 'airQuality'
+  | 'airQualityPm10'
+  | 'airQualityNo2'
   | 'crime'
   | 'healthcare'
   | 'schools'
   | 'internet'
   | 'noise'
-  | 'climate'
+  | 'climateTemp'
+  | 'climateRainfall'
   | 'rentalPrices'
   | 'employment'
   | 'amenities';

@@ -242,7 +242,8 @@ describe('computePointScore', () => {
 
   it('scores terrain layer from municipality data', () => {
     const enabled = [
-      { id: 'terrain' as const, label: 'Terrain', description: '', icon: '', enabled: true, weight: 1 },
+      { id: 'terrainSlope' as const, label: 'Slope', description: '', icon: '', enabled: true, weight: 1 },
+      { id: 'terrainElevation' as const, label: 'Elevation', description: '', icon: '', enabled: true, weight: 1 },
     ];
 
     const result = computePointScore(
@@ -250,20 +251,22 @@ describe('computePointScore', () => {
       municipalities, data, facilityPoints, climateStations,
     );
 
-    expect(result.layerScores.terrain).toBeDefined();
+    expect(result.layerScores.terrainSlope).toBeDefined();
+    expect(result.layerScores.terrainElevation).toBeDefined();
     expect(result.rawValues.slopeDeg).toBe(10);
     expect(result.rawValues.elevationM).toBe(200);
   });
 
   it('scores climate from IDW interpolation', () => {
     const enabled = [
-      { id: 'climate' as const, label: 'Climate', description: '', icon: '', enabled: true, weight: 1 },
+      { id: 'climateTemp' as const, label: 'Temperature', description: '', icon: '', enabled: true, weight: 1 },
+      { id: 'climateRainfall' as const, label: 'Rainfall', description: '', icon: '', enabled: true, weight: 1 },
     ];
 
     const configs = { ...DEFAULT_LAYER_CONFIGS };
     configs.climate = {
-      temperature: { enabled: true, tf: { plateauEnd: 10, decayEnd: 25, floor: 0, mandatory: false, multiplier: 1, invert: false } },
-      rainfall: { enabled: true, tf: { plateauEnd: 200, decayEnd: 800, floor: 0, mandatory: false, multiplier: 1, invert: true } },
+      temperature: { enabled: true, tf: { plateauEnd: 10, decayEnd: 25, floor: 0, mandatory: false, multiplier: 1, shape: 'sin' as const } },
+      rainfall: { enabled: true, tf: { plateauEnd: 200, decayEnd: 800, floor: 0, mandatory: false, multiplier: 1, shape: 'sin' as const } },
     };
 
     const result = computePointScore(
@@ -271,7 +274,7 @@ describe('computePointScore', () => {
       municipalities, data, facilityPoints, climateStations,
     );
 
-    expect(result.layerScores.climate).toBeDefined();
+    expect(result.layerScores.climateTemp).toBeDefined();
     expect(result.rawValues.avgTempC).toBeCloseTo(15, 0);
     expect(result.rawValues.avgRainfallMm).toBeCloseTo(500, 0);
   });

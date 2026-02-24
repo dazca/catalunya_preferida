@@ -1,16 +1,16 @@
 /**
- * @file CurveEditor: interactive SVG editor for sinusoidal transfer functions.
+ * @file CurveEditor: interactive SVG editor for transfer functions.
  *
  * Shows a graph with:
  *   - X axis: raw data value (with actual data range from DataStats)
  *   - Y axis: output score 0-1
  *   - Draggable handles for plateauEnd, decayEnd, floor
- *   - Visual sinusoidal decay curve
+ *   - Curve shape matching the TF shape (sin/invsin/range/invrange)
  *   - Data distribution markers (min, p25, median, p75, max)
- *   - Mandatory toggle and invert indicator
+ *   - Shape selector, mandatory toggle
  */
 import { useCallback, useRef, useState } from 'react';
-import type { TransferFunction, DataStats } from '../types/transferFunction';
+import type { TransferFunction, DataStats, TfShape } from '../types/transferFunction';
 import './CurveEditor.css';
 
 interface CurveEditorProps {
@@ -30,7 +30,7 @@ const H = 140;
 const PAD_L = 36;
 const PAD_R = 8;
 const PAD_T = 8;
-const PAD_B = 24;
+const PAD_B = 30;
 const PLOT_W = W - PAD_L - PAD_R;
 const PLOT_H = H - PAD_T - PAD_B;
 
@@ -55,10 +55,12 @@ function fromSvgY(svgY: number): number {
 }
 
 /**
- * Generate SVG path for the sinusoidal transfer function curve.
+ * Generate SVG path for the transfer function curve.
  */
 function buildCurvePath(tf: TransferFunction, rangeMax: number): string {
-  const { plateauEnd, decayEnd, floor } = tf;
+  const { plateauEnd: M, decayEnd: N, floor, shape } = tf;
+  const high = 1.0;
+  const low = floor;
   const steps = 60;
   const points: string[] = [];
 
@@ -66,13 +68,31 @@ function buildCurvePath(tf: TransferFunction, rangeMax: number): string {
     const x = (i / steps) * rangeMax;
     let y: number;
 
-    if (x <= plateauEnd) {
-      y = 1.0;
-    } else if (x >= decayEnd) {
-      y = floor;
-    } else {
-      const t = (x - plateauEnd) / (decayEnd - plateauEnd);
-      y = floor + (1 - floor) * 0.5 * (1 + Math.cos(Math.PI * t));
+    const span = N - M;
+    const t = Math.abs(span) < 1e-9 ? 0 : Math.max(0, Math.min(1, (x - M) / span));
+
+    switch (shape) {
+      case 'invsin':
+        if (x <= M) y = low;
+        else if (x >= N) y = high;
+        else y = low + (high - low) * 0.5 * (1 - Math.cos(Math.PI * t));
+        break;
+      case 'range':
+        if (x <= M) y = high;
+        else if (x >= N) y = low;
+        else y = high - (high - low) * t;
+        break;
+      case 'invrange':
+        if (x <= M) y = low;
+        else if (x >= N) y = high;
+        else y = low + (high - low) * t;
+        break;
+      case 'sin':
+      default:
+        if (x <= M) y = high;
+        else if (x >= N) y = low;
+        else y = low + (high - low) * 0.5 * (1 + Math.cos(Math.PI * t));
+        break;
     }
 
     const sx = toSvgX(x, rangeMax);
@@ -140,9 +160,23 @@ export default function CurveEditor({
   }, []);
 
   // Handle positions
+  const isInv = tf.shape === 'invsin' || tf.shape === 'invrange';
   const plateauX = toSvgX(tf.plateauEnd, rangeMax);
   const decayX = toSvgX(tf.decayEnd, rangeMax);
   const floorY = toSvgY(tf.floor);
+  // For normal shapes, plateau handle at top (1.0) and decay at floor.
+  // For inverted shapes, plateau handle at floor (low) and decay at top (1.0).
+  const plateauHandleY = isInv ? floorY : toSvgY(1.0);
+  const decayHandleY = isInv ? toSvgY(1.0) : floorY;
+
+  // Shape cycling
+  const SHAPES: TfShape[] = ['sin', 'invsin', 'range', 'invrange'];
+  const SHAPE_LABELS: Record<TfShape, string> = { sin: 'SIN', invsin: 'INVSIN', range: 'RANGE', invrange: 'INVRANGE' };
+  const cycleShape = useCallback(() => {
+    const idx = SHAPES.indexOf(tf.shape ?? 'sin');
+    const next = SHAPES[(idx + 1) % SHAPES.length];
+    onChange({ ...tf, shape: next });
+  }, [tf, onChange]);
 
   // Curve path
   const curvePath = buildCurvePath(tf, rangeMax);
@@ -195,6 +229,15 @@ export default function CurveEditor({
         </text>
       ))}
 
+      <text
+        x={10}
+        y={PAD_T + PLOT_H / 2}
+        className="ce-axis-title"
+        transform={`rotate(-90 10 ${PAD_T + PLOT_H / 2})`}
+      >
+        Score
+      </text>
+
       {/* X-axis labels */}
       {xTicks.map((v) => (
         <text
@@ -206,6 +249,14 @@ export default function CurveEditor({
           {v.toFixed(0)}
         </text>
       ))}
+
+      <text
+        x={PAD_L + PLOT_W / 2}
+        y={H - 2}
+        className="ce-axis-title ce-axis-title-x"
+      >
+        Value ({unit})
+      </text>
 
       {/* Data distribution markers */}
       {stats && stats.count > 0 && (
@@ -277,14 +328,14 @@ export default function CurveEditor({
       {/* Draggable handles */}
       <circle
         cx={plateauX}
-        cy={toSvgY(1.0)}
+        cy={plateauHandleY}
         r={6}
         className={`ce-handle ce-handle-plateau ${dragging === 'plateauEnd' ? 'active' : ''}`}
         onMouseDown={handleMouseDown('plateauEnd')}
       />
       <circle
         cx={decayX}
-        cy={floorY}
+        cy={decayHandleY}
         r={6}
         className={`ce-handle ce-handle-decay ${dragging === 'decayEnd' ? 'active' : ''}`}
         onMouseDown={handleMouseDown('decayEnd')}
@@ -300,21 +351,34 @@ export default function CurveEditor({
       />
 
       {/* Handle labels */}
-      <text x={plateauX} y={toSvgY(1.0) - 10} className="ce-handle-label">
+      <text x={plateauX} y={plateauHandleY - 10} className="ce-handle-label">
         {tf.plateauEnd.toFixed(0)}{unit}
       </text>
-      <text x={decayX} y={floorY - 10} className="ce-handle-label">
+      <text x={decayX} y={decayHandleY - 10} className="ce-handle-label">
         {tf.decayEnd.toFixed(0)}{unit}
       </text>
       <text x={PAD_L + PLOT_W + 2} y={floorY + 3} className="ce-handle-label ce-floor-label">
         {(tf.floor * 100).toFixed(0)}%
       </text>
 
-      {/* Invert indicator */}
-      {tf.invert && (
-        <text x={PAD_L + 4} y={PAD_T + 12} className="ce-invert-badge">
-          INV
-        </text>
+      {/* Shape badge (clickable to cycle) */}
+      <text
+        x={PAD_L + 4} y={PAD_T + 12}
+        className="ce-shape-badge"
+        style={{ cursor: 'pointer' }}
+        onClick={cycleShape}
+      >
+        {SHAPE_LABELS[tf.shape ?? 'sin']}
+      </text>
+
+      {/* Mandatory threshold marker */}
+      {tf.mandatory && (
+        <circle
+          cx={decayX}
+          cy={floorY}
+          r={3.2}
+          className="ce-required-dot"
+        />
       )}
     </svg>
   );

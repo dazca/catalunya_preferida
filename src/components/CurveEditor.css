@@ -39,6 +39,17 @@
   text-anchor: middle;
 }
 
+.ce-axis-title {
+  font-size: 8px;
+  fill: #c8d0e8;
+  font-weight: 600;
+  text-anchor: middle;
+}
+
+.ce-axis-title-x {
+  text-anchor: middle;
+}
+
 /* Data distribution markers */
 .ce-iqr {
   fill: rgba(100, 149, 237, 0.12);
@@ -129,9 +140,20 @@
   font-size: 7px;
 }
 
-/* Invert badge */
-.ce-invert-badge {
+/* Shape badge (clickable) */
+.ce-shape-badge {
   font-size: 7px;
-  fill: #ffa726;
+  fill: #90caf9;
   font-weight: bold;
+  user-select: none;
+  cursor: pointer;
+}
+.ce-shape-badge:hover {
+  fill: #42a5f5;
+}
+
+.ce-required-dot {
+  fill: #ef4444;
+  stroke: #ffd0d0;
+  stroke-width: 0.9;
 }

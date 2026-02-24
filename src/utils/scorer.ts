@@ -12,6 +12,7 @@ import {
   evaluateTransferFunction,
   scoreAspect,
 } from './transferFunction';
+import { evaluateCustomFormula } from './formulaEngine';
 import type {
   VoteSentiment,
   TerrainStats,
@@ -51,6 +52,57 @@ export function normalizeIne(code: string): string {
 /** Clamp value to [0, 1]. */
 export function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
+}
+
+export function buildRawFormulaValues(
+  codi: string,
+  data: MunicipalityData,
+  terrainOverride?: { slopeDeg: number; elevationM: number; aspect?: string },
+): Record<string, number | undefined> {
+  const key = normalizeIne(codi);
+  const terrain = data.terrain[key];
+  const votes = data.votes[key];
+  const forest = data.forest[key];
+  const air = data.airQuality[key];
+  const climate = data.climate[key];
+  const crime = data.crime[key];
+  const internet = data.internet[key];
+  const rental = data.rentalPrices[key];
+  const employment = data.employment[key];
+
+  const slope = terrainOverride?.slopeDeg ?? terrain?.avgSlopeDeg;
+  const elevation = terrainOverride?.elevationM ?? terrain?.avgElevationM;
+  const publicTransport = data.transitDistKm[key];
+
+  return {
+    slope,
+    terrainSlope: slope,
+    elevation,
+    terrainElevation: elevation,
+    publicTransport,
+    transit: publicTransport,
+    leftvotesentinent: votes?.leftPct,
+    votesLeft: votes?.leftPct,
+    votesRight: votes?.rightPct,
+    votesIndep: votes?.independencePct,
+    votesUnionist: votes?.unionistPct,
+    votesTurnout: votes?.turnoutPct,
+    forest: forest?.forestPct,
+    airQualityPm10: air?.pm10,
+    airQualityNo2: air?.no2,
+    airPm10: air?.pm10,
+    airNo2: air?.no2,
+    crime: crime?.ratePerThousand,
+    healthcare: data.healthcareDistKm[key],
+    schools: data.schoolDistKm[key],
+    internet: internet?.fiberPct,
+    climateTemp: climate?.avgTempC,
+    climateRainfall: climate?.avgRainfallMm,
+    climateRain: climate?.avgRainfallMm,
+    rentalPrices: rental?.avgEurMonth,
+    employment: employment?.unemploymentPct,
+    amenities: data.amenityDistKm[key],
+  };
 }
 
 // ── Sub-score helpers ──────────────────────────────────────────────────
@@ -113,29 +165,59 @@ type LayerScorer = (
 ) => { score: number; disqualified: boolean } | undefined;
 
 const SCORERS: Record<LayerId, LayerScorer> = {
-  terrain: (codi, configs, data) => {
+  terrainSlope: (codi, configs, data) => {
     const t = data.terrain[normalizeIne(codi)];
     if (!t) return undefined;
-    const slope = scoreSingleTf(t.avgSlopeDeg, configs.terrain.slope);
-    const elev = scoreSingleTf(t.avgElevationM, configs.terrain.elevation);
-    const aspect: SubResult = {
+    return combineSubScores([scoreSingleTf(t.avgSlopeDeg, configs.terrain.slope)]);
+  },
+  terrainElevation: (codi, configs, data) => {
+    const t = data.terrain[normalizeIne(codi)];
+    if (!t) return undefined;
+    return combineSubScores([scoreSingleTf(t.avgElevationM, configs.terrain.elevation)]);
+  },
+  terrainAspect: (codi, configs, data) => {
+    const t = data.terrain[normalizeIne(codi)];
+    if (!t) return undefined;
+    return {
       score: scoreAspect(t.dominantAspect, configs.terrain.aspect),
-      weight: configs.terrain.aspectWeight ?? 1,
       disqualified: false,
     };
-    return combineSubScores([slope, elev, aspect]);
   },
 
-  votes: (codi, configs, data) => {
+  votesLeft: (codi, configs, data) => {
     const v = data.votes[normalizeIne(codi)];
     if (!v) return undefined;
-    const terms = configs.votes.terms;
-    if (!terms || terms.length === 0) return undefined;
-    const subs = terms.map((term) => {
-      const raw = v[term.metric] as number | undefined;
-      return scoreSingleTf(raw, term.value);
-    });
-    return combineSubScores(subs);
+    const term = configs.votes.terms.find((t) => t.metric === 'leftPct');
+    if (!term) return undefined;
+    return combineSubScores([scoreSingleTf(v.leftPct, term.value)]);
+  },
+  votesRight: (codi, configs, data) => {
+    const v = data.votes[normalizeIne(codi)];
+    if (!v) return undefined;
+    const term = configs.votes.terms.find((t) => t.metric === 'rightPct');
+    if (!term) return undefined;
+    return combineSubScores([scoreSingleTf(v.rightPct, term.value)]);
+  },
+  votesIndep: (codi, configs, data) => {
+    const v = data.votes[normalizeIne(codi)];
+    if (!v) return undefined;
+    const term = configs.votes.terms.find((t) => t.metric === 'independencePct');
+    if (!term) return undefined;
+    return combineSubScores([scoreSingleTf(v.independencePct, term.value)]);
+  },
+  votesUnionist: (codi, configs, data) => {
+    const v = data.votes[normalizeIne(codi)];
+    if (!v) return undefined;
+    const term = configs.votes.terms.find((t) => t.metric === 'unionistPct');
+    if (!term) return undefined;
+    return combineSubScores([scoreSingleTf(v.unionistPct, term.value)]);
+  },
+  votesTurnout: (codi, configs, data) => {
+    const v = data.votes[normalizeIne(codi)];
+    if (!v) return undefined;
+    const term = configs.votes.terms.find((t) => t.metric === 'turnoutPct');
+    if (!term) return undefined;
+    return combineSubScores([scoreSingleTf(v.turnoutPct, term.value)]);
   },
 
   transit: (codi, configs, data) => {
@@ -149,16 +231,18 @@ const SCORERS: Record<LayerId, LayerScorer> = {
   },
 
   soil: () => {
-    // No real data — neutral score
     return { score: 0.5, disqualified: false };
   },
 
-  airQuality: (codi, configs, data) => {
+  airQualityPm10: (codi, configs, data) => {
     const a = data.airQuality[normalizeIne(codi)];
     if (!a) return undefined;
-    const pm10 = scoreSingleTf(a.pm10, configs.airQuality.pm10);
-    const no2 = scoreSingleTf(a.no2, configs.airQuality.no2);
-    return combineSubScores([pm10, no2]);
+    return combineSubScores([scoreSingleTf(a.pm10, configs.airQuality.pm10)]);
+  },
+  airQualityNo2: (codi, configs, data) => {
+    const a = data.airQuality[normalizeIne(codi)];
+    if (!a) return undefined;
+    return combineSubScores([scoreSingleTf(a.no2, configs.airQuality.no2)]);
   },
 
   crime: (codi, configs, data) => {
@@ -187,12 +271,15 @@ const SCORERS: Record<LayerId, LayerScorer> = {
     return { score: 0.5, disqualified: false };
   },
 
-  climate: (codi, configs, data) => {
+  climateTemp: (codi, configs, data) => {
     const c = data.climate[normalizeIne(codi)];
     if (!c) return undefined;
-    const temp = scoreSingleTf(c.avgTempC, configs.climate.temperature);
-    const rain = scoreSingleTf(c.avgRainfallMm, configs.climate.rainfall);
-    return combineSubScores([temp, rain]);
+    return combineSubScores([scoreSingleTf(c.avgTempC, configs.climate.temperature)]);
+  },
+  climateRainfall: (codi, configs, data) => {
+    const c = data.climate[normalizeIne(codi)];
+    if (!c) return undefined;
+    return combineSubScores([scoreSingleTf(c.avgRainfallMm, configs.climate.rainfall)]);
   },
 
   rentalPrices: (codi, configs, data) => {
@@ -229,6 +316,7 @@ export function computeScore(
   enabledLayers: LayerMeta[],
   configs: LayerConfigs,
   data: MunicipalityData,
+  customFormula?: string,
 ): { score: number; layerScores: Partial<Record<LayerId, number>>; disqualified: boolean } {
   const layerScores: Partial<Record<LayerId, number>> = {};
   let weightedSum = 0;
@@ -249,23 +337,19 @@ export function computeScore(
     totalWeight += layer.weight;
   }
 
-  const score = disqualified ? 0 : totalWeight > 0 ? weightedSum / totalWeight : 0;
+  let score = disqualified ? 0 : totalWeight > 0 ? weightedSum / totalWeight : 0;
+  if (!disqualified && customFormula && customFormula.trim()) {
+    score = evaluateCustomFormula(customFormula, buildRawFormulaValues(codi, data));
+  }
   return { score, layerScores, disqualified };
 }
 
 /**
  * Compute the composite score for a single municipality, but substitute
- * real-DEM derived slope / elevation / aspect for the terrain sub-layer.
+ * real-DEM derived slope / elevation / aspect for terrain sub-layers.
  *
  * Used by the heatmap renderer and point analysis to produce per-pixel
  * terrain variation rather than municipality-averaged synthetic values.
- *
- * @param codi            Municipality code (used for all non-terrain layers)
- * @param enabledLayers   Enabled layer descriptors with weights
- * @param configs         Transfer function configs
- * @param data            Municipality data tables
- * @param terrainOverride Real DEM values at the target pixel; omit to use
- *                        the municipality average fallback.
  */
 export function computeScoreWithTerrainOverride(
   codi: string,
@@ -273,6 +357,7 @@ export function computeScoreWithTerrainOverride(
   configs: LayerConfigs,
   data: MunicipalityData,
   terrainOverride?: { slopeDeg: number; elevationM: number; aspect?: string },
+  customFormula?: string,
 ): { score: number; disqualified: boolean } {
   let weightedSum = 0;
   let totalWeight = 0;
@@ -282,15 +367,18 @@ export function computeScoreWithTerrainOverride(
     const id = layer.id;
     let result: { score: number; disqualified: boolean } | undefined;
 
-    if (id === 'terrain' && terrainOverride) {
-      const slope = scoreSingleTf(terrainOverride.slopeDeg, configs.terrain.slope);
-      const elev  = scoreSingleTf(terrainOverride.elevationM, configs.terrain.elevation);
-      const aspect: SubResult = {
-        score: scoreAspect(terrainOverride.aspect ?? 'N', configs.terrain.aspect),
-        weight: configs.terrain.aspectWeight ?? 1,
-        disqualified: false,
-      };
-      result = combineSubScores([slope, elev, aspect]);
+    if (TERRAIN_SUB_IDS.has(id) && terrainOverride) {
+      switch (id) {
+        case 'terrainSlope':
+          result = combineSubScores([scoreSingleTf(terrainOverride.slopeDeg, configs.terrain.slope)]);
+          break;
+        case 'terrainElevation':
+          result = combineSubScores([scoreSingleTf(terrainOverride.elevationM, configs.terrain.elevation)]);
+          break;
+        case 'terrainAspect':
+          result = { score: scoreAspect(terrainOverride.aspect ?? 'N', configs.terrain.aspect), disqualified: false };
+          break;
+      }
     } else {
       const scorer = SCORERS[id];
       if (scorer) result = scorer(codi, configs, data);
@@ -302,11 +390,21 @@ export function computeScoreWithTerrainOverride(
     totalWeight += layer.weight;
   }
 
-  const score = disqualified ? 0 : totalWeight > 0 ? weightedSum / totalWeight : 0;
+  let score = disqualified ? 0 : totalWeight > 0 ? weightedSum / totalWeight : 0;
+  if (!disqualified && customFormula && customFormula.trim()) {
+    score = evaluateCustomFormula(customFormula, buildRawFormulaValues(codi, data, terrainOverride));
+  }
   return { score, disqualified };
 }
 
 /* ── Per-pixel terrain helpers (used by heatmap renderer) ────────────── */
+
+/** Set of terrain sub-layer IDs that require per-pixel DEM evaluation. */
+export const TERRAIN_SUB_IDS: ReadonlySet<string> = new Set([
+  'terrainSlope',
+  'terrainElevation',
+  'terrainAspect',
+]);
 
 /**
  * Cached result of the non-terrain layer composite for one municipality.
@@ -337,7 +435,7 @@ export function computeNonTerrainCached(
   let disqualified = false;
 
   for (const layer of enabledLayers) {
-    if (layer.id === 'terrain') continue;
+    if (TERRAIN_SUB_IDS.has(layer.id)) continue;
     const scorer = SCORERS[layer.id];
     if (!scorer) continue;
     const result = scorer(codi, configs, data);
@@ -351,33 +449,109 @@ export function computeNonTerrainCached(
 }
 
 /**
- * Evaluate only the terrain sub-layer from raw DEM values without any data
- * table lookup.  Pure, deterministic, very fast — safe to call 30 000× per
- * heatmap render.
- *
- * @returns Weighted contribution and weight to be combined with NonTerrainCached.
+ * Check if a municipality is disqualified (any mandatory layer scores below
+ * its floor). Early-exits on the first disqualified layer.
  */
-export function evaluateTerrainPixel(
+export function isDisqualified(
+  codi: string,
+  enabledLayers: LayerMeta[],
+  configs: LayerConfigs,
+  data: MunicipalityData,
+): boolean {
+  for (const layer of enabledLayers) {
+    const scorer = SCORERS[layer.id];
+    if (!scorer) continue;
+    const result = scorer(codi, configs, data);
+    if (result?.disqualified) return true;
+  }
+  return false;
+}
+
+/**
+ * Check if a municipality is disqualified by non-terrain layers only.
+ * Used for the per-municipality cache in the heatmap custom-formula path.
+ */
+export function isNonTerrainDisqualified(
+  codi: string,
+  enabledLayers: LayerMeta[],
+  configs: LayerConfigs,
+  data: MunicipalityData,
+): boolean {
+  for (const layer of enabledLayers) {
+    if (TERRAIN_SUB_IDS.has(layer.id)) continue;
+    const scorer = SCORERS[layer.id];
+    if (!scorer) continue;
+    const result = scorer(codi, configs, data);
+    if (result?.disqualified) return true;
+  }
+  return false;
+}
+
+/**
+ * Check if a single pixel is disqualified by terrain mandatory layers.
+ * Only evaluates slope and elevation TFs (aspect has no mandatory).
+ * Called per-pixel in the heatmap loop — must be very fast.
+ */
+export function isTerrainDisqualifiedPixel(
+  slopeDeg: number,
+  elevationM: number,
+  terrainSubLayers: LayerMeta[],
+  configs: LayerConfigs,
+): boolean {
+  for (const layer of terrainSubLayers) {
+    switch (layer.id) {
+      case 'terrainSlope': {
+        const r = scoreSingleTf(slopeDeg, configs.terrain.slope);
+        if (r?.disqualified) return true;
+        break;
+      }
+      case 'terrainElevation': {
+        const r = scoreSingleTf(elevationM, configs.terrain.elevation);
+        if (r?.disqualified) return true;
+        break;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Evaluate all enabled terrain sub-layers from raw DEM values.
+ * Pure, deterministic, fast — safe to call 30 000× per heatmap render.
+ *
+ * @returns Weighted contributions and total weight to combine with NonTerrainCached.
+ */
+export function evaluateTerrainPixels(
   slopeDeg: number,
   elevationM: number,
   aspect: string,
-  terrainLayerWeight: number,
+  terrainSubLayers: LayerMeta[],
   configs: LayerConfigs,
-): { contrib: number; weight: number; disqualified: boolean } {
-  const slope = scoreSingleTf(slopeDeg, configs.terrain.slope);
-  const elev  = scoreSingleTf(elevationM, configs.terrain.elevation);
-  const asp: SubResult = {
-    score: scoreAspect(aspect, configs.terrain.aspect),
-    weight: configs.terrain.aspectWeight ?? 1,
-    disqualified: false,
-  };
-  const result = combineSubScores([slope, elev, asp]);
-  if (!result) return { contrib: 0, weight: 0, disqualified: false };
-  return {
-    contrib: result.score * terrainLayerWeight,
-    weight: terrainLayerWeight,
-    disqualified: result.disqualified,
-  };
+): { weightedSum: number; totalWeight: number; disqualified: boolean } {
+  let weightedSum = 0;
+  let totalWeight = 0;
+  let disqualified = false;
+
+  for (const layer of terrainSubLayers) {
+    let result: { score: number; disqualified: boolean } | undefined;
+    switch (layer.id) {
+      case 'terrainSlope':
+        result = combineSubScores([scoreSingleTf(slopeDeg, configs.terrain.slope)]);
+        break;
+      case 'terrainElevation':
+        result = combineSubScores([scoreSingleTf(elevationM, configs.terrain.elevation)]);
+        break;
+      case 'terrainAspect':
+        result = { score: scoreAspect(aspect, configs.terrain.aspect), disqualified: false };
+        break;
+    }
+    if (!result) continue;
+    weightedSum += result.score * layer.weight;
+    totalWeight += layer.weight;
+    if (result.disqualified) disqualified = true;
+  }
+
+  return { weightedSum, totalWeight, disqualified };
 }
 
 /**
@@ -388,12 +562,13 @@ export function computeAllScores(
   layers: LayerMeta[],
   configs: LayerConfigs,
   data: MunicipalityData,
+  customFormula?: string,
 ): Record<string, { score: number } & Partial<Record<LayerId, number>>> {
   const enabled = layers.filter((l) => l.enabled);
   const result: Record<string, { score: number } & Partial<Record<LayerId, number>>> = {};
 
   for (const codi of municipalityCodes) {
-    const { score, layerScores } = computeScore(codi, enabled, configs, data);
+    const { score, layerScores } = computeScore(codi, enabled, configs, data, customFormula);
     result[codi] = { score, ...layerScores };
   }
 

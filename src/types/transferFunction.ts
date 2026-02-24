@@ -21,19 +21,28 @@
  * When `invert` is true, the input is mirrored: effective = max - (input - min).
  * This is for "lower is better" metrics (crime, pollution, rent, distance).
  */
+/** Curve shape: sinusoidal or linear, normal or inverted direction. */
+export type TfShape = 'sin' | 'invsin' | 'range' | 'invrange';
+
 export interface TransferFunction {
-  /** Start of the plateau zone (raw data units). Full score (1.0) below this. */
+  /** Start of the transition zone (raw data units). */
   plateauEnd: number;
-  /** End of the decay zone (raw data units). Score = floor beyond this. */
+  /** End of the transition zone (raw data units). */
   decayEnd: number;
-  /** Minimum output score (0-1) past the decay zone. */
+  /** Output value at the "low" end of the curve (0-1). */
   floor: number;
   /** If true, this layer is required — municipality is disqualified if score = floor. */
   mandatory: boolean;
   /** Weight multiplier (default 1.0). Scales this layer's contribution. */
   multiplier: number;
-  /** If true, invert the input axis (lower raw value = higher score). */
-  invert: boolean;
+  /**
+   * Curve shape:
+   * - `sin`      : sinusoidal ≤M→1, ≥N→floor  (default)
+   * - `invsin`   : sinusoidal ≤M→floor, ≥N→1   (ascending)
+   * - `range`    : linear     ≤M→1, ≥N→floor
+   * - `invrange` : linear     ≤M→floor, ≥N→1   (ascending)
+   */
+  shape: TfShape;
 }
 
 /**
@@ -142,10 +151,10 @@ export interface LayerConfigs {
 export function defaultTf(
   plateauEnd: number,
   decayEnd: number,
-  invert = false,
+  shape: TfShape = 'sin',
   floor = 0,
 ): TransferFunction {
-  return { plateauEnd, decayEnd, floor, mandatory: false, multiplier: 1, invert };
+  return { plateauEnd, decayEnd, floor, mandatory: false, multiplier: 1, shape };
 }
 
 /** Default aspect preferences: slight preference for south-facing slopes. */
@@ -163,33 +172,37 @@ export const DEFAULT_ASPECT_PREFS: AspectPreferences = {
 /** Default layer configurations with sensible ranges. */
 export const DEFAULT_LAYER_CONFIGS: LayerConfigs = {
   terrain: {
-    /* Slopes above 5 ° start decaying; above 20 ° score drops to floor.
+    /* Slopes above 5° start decaying; above 20° score drops to floor.
        Elevation: gentle preference for 100–1500 m range. */
-    slope: { enabled: true, tf: defaultTf(5, 20, false, 0) },
-    elevation: { enabled: true, tf: defaultTf(100, 1500, false, 0) },
+    slope: { enabled: true, tf: defaultTf(5, 20, 'sin', 0) },
+    elevation: { enabled: true, tf: defaultTf(100, 1500, 'sin', 0) },
     aspect: { ...DEFAULT_ASPECT_PREFS },
     aspectWeight: 1,
   },
   votes: {
     terms: [
-      { id: 'v1', metric: 'leftPct', value: { enabled: true, tf: defaultTf(0, 100, false, 0) } },
+      { id: 'v1', metric: 'leftPct', value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
+      { id: 'v2', metric: 'rightPct', value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
+      { id: 'v3', metric: 'independencePct', value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
+      { id: 'v4', metric: 'unionistPct', value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
+      { id: 'v5', metric: 'turnoutPct', value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
     ],
   },
-  transit: { enabled: true, tf: defaultTf(5, 25, true, 0.1) },
-  forest: { enabled: true, tf: defaultTf(10, 80, false, 0) },
+  transit: { enabled: true, tf: defaultTf(5, 25, 'sin', 0.1) },
+  forest: { enabled: true, tf: defaultTf(10, 80, 'sin', 0) },
   airQuality: {
-    pm10: { enabled: false, tf: defaultTf(10, 50, true, 0) },
-    no2: { enabled: false, tf: defaultTf(10, 40, true, 0) },
+    pm10: { enabled: false, tf: defaultTf(10, 50, 'sin', 0) },
+    no2: { enabled: false, tf: defaultTf(10, 40, 'sin', 0) },
   },
-  crime: { enabled: false, tf: defaultTf(5, 50, true, 0) },
-  healthcare: { enabled: false, tf: defaultTf(3, 15, true, 0.1) },
-  schools: { enabled: false, tf: defaultTf(3, 10, true, 0.1) },
-  internet: { enabled: false, tf: defaultTf(50, 100, false, 0) },
+  crime: { enabled: false, tf: defaultTf(5, 50, 'sin', 0) },
+  healthcare: { enabled: false, tf: defaultTf(3, 15, 'sin', 0.1) },
+  schools: { enabled: false, tf: defaultTf(3, 10, 'sin', 0.1) },
+  internet: { enabled: false, tf: defaultTf(50, 100, 'sin', 0) },
   climate: {
-    temperature: { enabled: false, tf: defaultTf(10, 25, false, 0) },
-    rainfall: { enabled: false, tf: defaultTf(200, 800, true, 0) },
+    temperature: { enabled: false, tf: defaultTf(10, 25, 'sin', 0) },
+    rainfall: { enabled: false, tf: defaultTf(200, 800, 'sin', 0) },
   },
-  rentalPrices: { enabled: false, tf: defaultTf(300, 1500, true, 0) },
-  employment: { enabled: false, tf: defaultTf(3, 15, true, 0) },
-  amenities: { enabled: false, tf: defaultTf(3, 20, true, 0.1) },
+  rentalPrices: { enabled: false, tf: defaultTf(300, 1500, 'sin', 0) },
+  employment: { enabled: false, tf: defaultTf(3, 15, 'sin', 0) },
+  amenities: { enabled: false, tf: defaultTf(3, 20, 'sin', 0.1) },
 };

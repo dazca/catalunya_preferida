@@ -14,6 +14,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useAppStore } from '../store';
 import type { ViewSettings } from '../store';
+import './MapContainer.css';
 import { scoreToCssColor } from '../utils/turboColormap';
 import {
   registerHypsometricProtocol,
@@ -121,18 +122,16 @@ export default function MapContainer({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markerRef = useRef<maplibregl.Marker | null>(null);
+  const hoverPopupRef = useRef<maplibregl.Popup | null>(null);
   const loadedRef = useRef(false);
 
   /* -- Store selectors -- */
   const selectMunicipality = useAppStore((s) => s.selectMunicipality);
   const analysisPoint = useAppStore((s) => s.analysisPoint);
-  const pointAnalysisMode = useAppStore((s) => s.pointAnalysisMode);
   const setAnalysisPoint = useAppStore((s) => s.setAnalysisPoint);
   const view = useAppStore((s) => s.view);
 
   /* -- Mutable refs so event handlers see current values -- */
-  const analysisModeRef = useRef(pointAnalysisMode);
-  useEffect(() => { analysisModeRef.current = pointAnalysisMode; }, [pointAnalysisMode]);
   const setPointRef = useRef(setAnalysisPoint);
   useEffect(() => { setPointRef.current = setAnalysisPoint; }, [setAnalysisPoint]);
   const scoresRef = useRef(scores);
@@ -141,6 +140,8 @@ export default function MapContainer({
   useEffect(() => { viewRef.current = view; }, [view]);
   const onViewportChangeRef = useRef(onViewportChange);
   useEffect(() => { onViewportChangeRef.current = onViewportChange; }, [onViewportChange]);
+  const analysisPointRef = useRef(analysisPoint);
+  useEffect(() => { analysisPointRef.current = analysisPoint; }, [analysisPoint]);
 
   /* ---------------------------------------------------------------- */
   /*  Map initialisation (runs once)                                  */
@@ -180,6 +181,17 @@ export default function MapContainer({
       /* -- Discover DEM source from basemap style -- */
       const dem = findDemSource(style);
       const demId = dem?.id ?? 'terrainICGC';
+      const hillshadeDemId = 'terrain-hillshade-dem';
+
+      /* -- Remove any basemap hillshade layers that use the same DEM source
+       *    as 3D terrain.  The ICGC style may ship with its own hillshade;
+       *    we replace it with our own on a separate source.  Without this,
+       *    MapLibre warns "same source for hillshade and 3D terrain". -- */
+      for (const layer of (style.layers ?? [])) {
+        if (layer.type === 'hillshade' && 'source' in layer && layer.source === demId) {
+          try { map.removeLayer(layer.id); } catch { /* already removed */ }
+        }
+      }
 
       if (dem) {
         configureDemTiles(dem.tileUrl, dem.encoding);
@@ -212,12 +224,20 @@ export default function MapContainer({
       }
 
       /* -- 2. Hillshade (per-pixel normals from DEM) -- */
-      if (map.getSource(demId)) {
+      if (dem && !map.getSource(hillshadeDemId)) {
+        map.addSource(hillshadeDemId, {
+          type: 'raster-dem',
+          tiles: [dem.tileUrl],
+          tileSize: 256,
+          encoding: dem.encoding,
+        });
+      }
+      if (map.getSource(hillshadeDemId)) {
         map.addLayer(
           {
             id: 'terrain-hillshade',
             type: 'hillshade',
-            source: demId,
+            source: hillshadeDemId,
             paint: {
               'hillshade-illumination-direction': 335,
               'hillshade-exaggeration': 0.45,
@@ -318,36 +338,53 @@ export default function MapContainer({
 
       /* -- Click handlers -- */
 
-      // General click — analysis mode intercepts
-      map.on('click', (e) => {
-        if (!analysisModeRef.current) return;
-        setPointRef.current({ lat: e.lngLat.lat, lon: e.lngLat.lng });
-      });
-
-      // Municipality click — skips in analysis mode
+      // Click on municipality — set analysis point + select
       map.on('click', 'municipalities-fill', (e) => {
-        if (analysisModeRef.current) return;
         const feat = e.features?.[0];
         if (!feat?.properties?.codi) return;
         const codi = feat.properties.codi as string;
         selectMunicipality(codi);
         map.setFilter('municipalities-highlight', ['==', 'codi', codi]);
-        const score = scoresRef.current[codi];
-        new maplibregl.Popup({ closeOnClick: true })
-          .setLngLat(e.lngLat)
-          .setHTML(
-            `<strong>${feat.properties.nom ?? 'Unknown'}</strong><br/>` +
-            `Score: ${score !== undefined ? (score * 100).toFixed(0) + '%' : 'N/A'}`,
-          )
-          .addTo(map);
+        setPointRef.current({ lat: e.lngLat.lat, lon: e.lngLat.lng });
+        hoverPopupRef.current?.remove();
       });
 
-      // Cursor styling
-      map.on('mouseenter', 'municipalities-fill', () => {
-        if (!analysisModeRef.current) map.getCanvas().style.cursor = 'pointer';
+      // Click on empty area — clear analysis point
+      map.on('click', (e) => {
+        const features = map.queryRenderedFeatures(e.point, { layers: ['municipalities-fill'] });
+        if (features.length === 0) {
+          setPointRef.current(null);
+        }
+      });
+
+      /* -- Hover score tooltip -- */
+      const hoverPopup = new maplibregl.Popup({
+        closeButton: false,
+        closeOnClick: false,
+        className: 'map-hover-popup',
+        offset: [0, -10],
+        maxWidth: '240px',
+      });
+      hoverPopupRef.current = hoverPopup;
+
+      map.on('mousemove', 'municipalities-fill', (e) => {
+        // Hide hover tooltip when a point is pinned
+        if (analysisPointRef.current) return;
+        const feat = e.features?.[0];
+        if (!feat?.properties?.codi) { hoverPopup.remove(); return; }
+        const codi = feat.properties.codi as string;
+        const nom = (feat.properties.nom as string) ?? '';
+        const score = scoresRef.current[codi];
+        const pct = score != null ? `${(score * 100).toFixed(0)}%` : '—';
+        hoverPopup
+          .setLngLat(e.lngLat)
+          .setHTML(`<div class="map-hover-score"><strong>${nom}</strong> <span class="score-pct">${pct}</span></div>`)
+          .addTo(map);
+        map.getCanvas().style.cursor = 'pointer';
       });
       map.on('mouseleave', 'municipalities-fill', () => {
-        if (!analysisModeRef.current) map.getCanvas().style.cursor = '';
+        hoverPopup.remove();
+        map.getCanvas().style.cursor = '';
       });
     });
 
@@ -363,6 +400,17 @@ export default function MapContainer({
     map.on('zoomend', fireViewport);
 
     mapRef.current = map;
+
+    /* -- Handle WebGL context loss/recovery -- */
+    const canvas = map.getCanvas();
+    canvas.addEventListener('webglcontextlost', (ev) => {
+      ev.preventDefault();
+      console.warn('[MapContainer] WebGL context lost — will wait for restore');
+    });
+    canvas.addEventListener('webglcontextrestored', () => {
+      console.log('[MapContainer] WebGL context restored — triggering repaint');
+      map.triggerRepaint();
+    });
   }, [selectMunicipality]);
 
   /* -- Init / cleanup -- */
@@ -451,9 +499,8 @@ export default function MapContainer({
     if (map.getLayer('municipalities-line'))
       map.setLayoutProperty('municipalities-line', 'visibility', vis(view.showBorders));
 
-    // Choropleth
+    // Choropleth — keep fill layer always visible for hover interaction
     if (map.getLayer('municipalities-fill')) {
-      map.setLayoutProperty('municipalities-fill', 'visibility', vis(view.showChoropleth));
       map.setPaintProperty('municipalities-fill', 'fill-opacity', view.showChoropleth ? 0.6 : 0);
     }
 
@@ -486,11 +533,12 @@ export default function MapContainer({
     }
   }, [view]);
 
-  /** Cross-hair cursor in analysis mode. */
+  /** Hide hover tooltip when analysis point is pinned. */
   useEffect(() => {
-    const map = mapRef.current;
-    if (map) map.getCanvas().style.cursor = pointAnalysisMode ? 'crosshair' : '';
-  }, [pointAnalysisMode]);
+    if (analysisPoint) {
+      hoverPopupRef.current?.remove();
+    }
+  }, [analysisPoint]);
 
   /** Pink marker at the analysis point. */
   useEffect(() => {

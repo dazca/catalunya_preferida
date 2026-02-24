@@ -1,18 +1,24 @@
-/* Point Analysis Panel */
+/* Point Analysis Panel — dark theme */
 .pa-panel {
   position: fixed;
-  bottom: 20px;
-  left: 360px;
-  z-index: 1000;
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+  bottom: 70px;
+  left: 16px;
+  z-index: 2100;
+  background: rgba(12, 14, 22, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 10px;
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.5);
   padding: 14px 18px;
   min-width: 230px;
   max-width: 320px;
-  max-height: 60vh;
+  max-height: 55vh;
   overflow-y: auto;
-  font-family: inherit;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: #d9dff0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.08) transparent;
 }
 
 .pa-close {
@@ -23,31 +29,38 @@
   border: none;
   font-size: 16px;
   cursor: pointer;
-  color: #888;
+  color: #7a839e;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.14s;
 }
-
 .pa-close:hover {
-  color: #333;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
 }
 
 .pa-title {
   margin: 0 0 4px;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
-  color: #1a1a1a;
+  color: #e0e4f0;
 }
 
 .pa-coords {
-  font-size: 11px;
-  color: #999;
-  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  color: #464f65;
+  font-family: inherit;
   margin-bottom: 2px;
 }
 
 .pa-municipality {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
-  color: #444;
+  color: #a5b4fc;
   margin-bottom: 8px;
 }
 
@@ -59,8 +72,10 @@
 }
 
 .pa-score-label {
-  font-size: 12px;
-  color: #777;
+  font-size: 10px;
+  color: #7a839e;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
 }
 
 .pa-score-value {
@@ -69,16 +84,16 @@
 }
 
 .pa-breakdown {
-  border-top: 1px solid #eee;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
   padding-top: 6px;
   margin-top: 6px;
 }
 
 .pa-section-title {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
-  color: #aaa;
+  color: #464f65;
   letter-spacing: 0.5px;
   margin-bottom: 4px;
 }
@@ -91,17 +106,37 @@
 }
 
 .pa-layer-name {
-  font-size: 12px;
-  color: #555;
+  font-size: 11px;
+  color: #9098b0;
 }
 
 .pa-layer-score {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
 }
 
 .pa-raw-value {
-  font-size: 11px;
-  color: #666;
-  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  color: #7a839e;
+  font-family: inherit;
+}
+
+/* Light theme */
+@media (prefers-color-scheme: light) {
+  .pa-panel {
+    background: rgba(255, 255, 255, 0.96);
+    border-color: rgba(0, 0, 0, 0.12);
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.12);
+    color: #1a1a2e;
+  }
+  .pa-close { color: #888; }
+  .pa-close:hover { color: #ef4444; }
+  .pa-title { color: #1a1a1a; }
+  .pa-coords { color: #999; }
+  .pa-municipality { color: #4f46e5; }
+  .pa-score-label { color: #777; }
+  .pa-breakdown { border-top-color: #eee; }
+  .pa-section-title { color: #aaa; }
+  .pa-layer-name { color: #555; }
+  .pa-raw-value { color: #666; }
 }

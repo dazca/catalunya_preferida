@@ -2,6 +2,7 @@
  * @file PointAnalysisPanel: floating panel showing score breakdown
  *       for an arbitrary point on the map.
  */
+import { useEffect, useRef } from 'react';
 import { useAppStore } from '../store';
 import { useT } from '../i18n';
 import type { PointScoreResult } from '../utils/pointAnalysis';
@@ -39,9 +40,20 @@ function scoreColor(s: number): string {
 }
 
 export default function PointAnalysisPanel({ result }: PointAnalysisPanelProps) {
-  const { setAnalysisPoint, togglePointAnalysisMode } = useAppStore();
+  const { setAnalysisPoint } = useAppStore();
   const layers = useAppStore((s) => s.layers);
   const t = useT();
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  /* Esc key to close */
+  useEffect(() => {
+    if (!result) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAnalysisPoint(null);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [result, setAnalysisPoint]);
 
   if (!result) return null;
 
@@ -50,11 +62,10 @@ export default function PointAnalysisPanel({ result }: PointAnalysisPanelProps) 
 
   const close = () => {
     setAnalysisPoint(null);
-    togglePointAnalysisMode();
   };
 
   return (
-    <div className="pa-panel" data-testid="point-analysis-panel">
+    <div className="pa-panel" data-testid="point-analysis-panel" ref={panelRef}>
       <button className="pa-close" onClick={close} aria-label={t('pa.close')}>
         x
       </button>

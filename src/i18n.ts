@@ -63,8 +63,24 @@ export interface Translations {
   // ── Layer labels ──────────────────────────────────────────────────
   'layer.terrain.label': string;
   'layer.terrain.desc': string;
+  'layer.terrainSlope.label': string;
+  'layer.terrainSlope.desc': string;
+  'layer.terrainElevation.label': string;
+  'layer.terrainElevation.desc': string;
+  'layer.terrainAspect.label': string;
+  'layer.terrainAspect.desc': string;
   'layer.votes.label': string;
   'layer.votes.desc': string;
+  'layer.votesLeft.label': string;
+  'layer.votesLeft.desc': string;
+  'layer.votesRight.label': string;
+  'layer.votesRight.desc': string;
+  'layer.votesIndep.label': string;
+  'layer.votesIndep.desc': string;
+  'layer.votesUnionist.label': string;
+  'layer.votesUnionist.desc': string;
+  'layer.votesTurnout.label': string;
+  'layer.votesTurnout.desc': string;
   'layer.transit.label': string;
   'layer.transit.desc': string;
   'layer.forest.label': string;
@@ -73,6 +89,10 @@ export interface Translations {
   'layer.soil.desc': string;
   'layer.airQuality.label': string;
   'layer.airQuality.desc': string;
+  'layer.airQualityPm10.label': string;
+  'layer.airQualityPm10.desc': string;
+  'layer.airQualityNo2.label': string;
+  'layer.airQualityNo2.desc': string;
   'layer.crime.label': string;
   'layer.crime.desc': string;
   'layer.healthcare.label': string;
@@ -85,6 +105,10 @@ export interface Translations {
   'layer.noise.desc': string;
   'layer.climate.label': string;
   'layer.climate.desc': string;
+  'layer.climateTemp.label': string;
+  'layer.climateTemp.desc': string;
+  'layer.climateRainfall.label': string;
+  'layer.climateRainfall.desc': string;
   'layer.rentalPrices.label': string;
   'layer.rentalPrices.desc': string;
   'layer.employment.label': string;
@@ -192,8 +216,24 @@ const CA: Translations = {
 
   'layer.terrain.label': 'Terreny',
   'layer.terrain.desc': 'Pendent, orientacio, elevacio',
+  'layer.terrainSlope.label': 'Pendent del terreny',
+  'layer.terrainSlope.desc': 'Angle del pendent',
+  'layer.terrainElevation.label': 'Elevacio del terreny',
+  'layer.terrainElevation.desc': 'Altitud mitjana',
+  'layer.terrainAspect.label': 'Orientacio del terreny',
+  'layer.terrainAspect.desc': 'Direccio del pendent',
   'layer.votes.label': 'Sentiment electoral',
   'layer.votes.desc': 'Eix esquerra/dreta, independencia',
+  'layer.votesLeft.label': 'Esquerres %',
+  'layer.votesLeft.desc': 'Vot d\'esquerres',
+  'layer.votesRight.label': 'Dretes %',
+  'layer.votesRight.desc': 'Vot de dretes',
+  'layer.votesIndep.label': 'Independentisme %',
+  'layer.votesIndep.desc': 'Vot independentista',
+  'layer.votesUnionist.label': 'Unionisme %',
+  'layer.votesUnionist.desc': 'Vot unionista',
+  'layer.votesTurnout.label': 'Participacio %',
+  'layer.votesTurnout.desc': 'Participacio electoral',
   'layer.transit.label': 'Transport public',
   'layer.transit.desc': 'Proximitat a tren, metro, bus',
   'layer.forest.label': 'Cobertura forestal',
@@ -202,6 +242,10 @@ const CA: Translations = {
   'layer.soil.desc': 'Dades geologiques i d\'aigua',
   'layer.airQuality.label': "Qualitat de l'aire",
   'layer.airQuality.desc': 'NO2, PM10, PM2.5, O3',
+  'layer.airQualityPm10.label': 'Particules PM10',
+  'layer.airQualityPm10.desc': 'Qualitat de l\'aire PM10',
+  'layer.airQualityNo2.label': 'Diòxid de nitrogen',
+  'layer.airQualityNo2.desc': 'Nivells de NO₂',
   'layer.crime.label': 'Taxes de delictes',
   'layer.crime.desc': 'Delictes per 1000 habitants',
   'layer.healthcare.label': 'Sanitat',
@@ -214,6 +258,10 @@ const CA: Translations = {
   'layer.noise.desc': 'Nivells de contaminacio acustica',
   'layer.climate.label': 'Clima',
   'layer.climate.desc': 'Temperatura, pluja, vent',
+  'layer.climateTemp.label': 'Temperatura',
+  'layer.climateTemp.desc': 'Temperatura mitjana',
+  'layer.climateRainfall.label': 'Precipitacio',
+  'layer.climateRainfall.desc': 'Nivells de precipitacio',
   'layer.rentalPrices.label': 'Preus de lloguer',
   'layer.rentalPrices.desc': 'Lloguer mitja per municipi',
   'layer.employment.label': 'Ocupacio',
@@ -314,8 +362,24 @@ const EN: Translations = {
 
   'layer.terrain.label': 'Terrain',
   'layer.terrain.desc': 'Slope, aspect, elevation',
+  'layer.terrainSlope.label': 'Terrain Slope',
+  'layer.terrainSlope.desc': 'Slope angle',
+  'layer.terrainElevation.label': 'Terrain Elevation',
+  'layer.terrainElevation.desc': 'Average altitude',
+  'layer.terrainAspect.label': 'Slope Orientation',
+  'layer.terrainAspect.desc': 'Slope direction',
   'layer.votes.label': 'Vote Sentiment',
   'layer.votes.desc': 'Left/right, independence axis',
+  'layer.votesLeft.label': 'Left-wing %',
+  'layer.votesLeft.desc': 'Left-wing vote share',
+  'layer.votesRight.label': 'Right-wing %',
+  'layer.votesRight.desc': 'Right-wing vote share',
+  'layer.votesIndep.label': 'Independence %',
+  'layer.votesIndep.desc': 'Pro-independence vote share',
+  'layer.votesUnionist.label': 'Unionist %',
+  'layer.votesUnionist.desc': 'Unionist vote share',
+  'layer.votesTurnout.label': 'Turnout %',
+  'layer.votesTurnout.desc': 'Voter turnout',
   'layer.transit.label': 'Public Transit',
   'layer.transit.desc': 'Rail, metro, bus proximity',
   'layer.forest.label': 'Forest Cover',
@@ -324,6 +388,10 @@ const EN: Translations = {
   'layer.soil.desc': 'Geological and water data',
   'layer.airQuality.label': 'Air Quality',
   'layer.airQuality.desc': 'NO2, PM10, PM2.5, O3',
+  'layer.airQualityPm10.label': 'PM10 Particles',
+  'layer.airQualityPm10.desc': 'PM10 air quality',
+  'layer.airQualityNo2.label': 'Nitrogen Dioxide',
+  'layer.airQualityNo2.desc': 'NO₂ levels',
   'layer.crime.label': 'Crime Rates',
   'layer.crime.desc': 'Offenses per 1000 inhabitants',
   'layer.healthcare.label': 'Healthcare',
@@ -336,6 +404,10 @@ const EN: Translations = {
   'layer.noise.desc': 'Noise pollution levels',
   'layer.climate.label': 'Climate',
   'layer.climate.desc': 'Temperature, rainfall, wind',
+  'layer.climateTemp.label': 'Temperature',
+  'layer.climateTemp.desc': 'Average temperature',
+  'layer.climateRainfall.label': 'Rainfall',
+  'layer.climateRainfall.desc': 'Precipitation levels',
   'layer.rentalPrices.label': 'Rental Prices',
   'layer.rentalPrices.desc': 'Average rent per municipality',
   'layer.employment.label': 'Employment',

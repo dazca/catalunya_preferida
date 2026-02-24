@@ -11,8 +11,17 @@ export default defineConfig({
   },
   publicDir: 'public',
   server: {
+    host: true,
     port: 5173,
+    strictPort: true,
     open: false,
+    hmr: {
+      protocol: 'ws',
+      host: 'localhost',
+      port: 5173,
+      clientPort: 5173,
+      path: '/altres/catmap/',
+    },
     fs: {
       allow: ['..'],
     },
