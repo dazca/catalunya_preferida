@@ -19,7 +19,8 @@ import {
   CATALONIA_VIEWPORT,
 } from './utils/heatmapGrid';
 import type { ViewportSpec } from './utils/heatmapGrid';
-import { onDemLoaded, loadViewportTiles } from './utils/demSlope';
+import { onDemLoaded, loadViewportTiles, isDemLoaded, sampleDemViewport } from './utils/demSlope';
+import { requestHeatmapRender, gridViewportSpecForZoom } from './utils/heatmapBridge';
 
 export default function App() {
   const { layers, configs, view, customFormula, formulaMode, analysisPoint, soloLayer, undo, redo } = useAppStore();
@@ -128,6 +129,8 @@ export default function App() {
   );
   /** Current viewport spec — drives heatmap re-render on pan/zoom. */
   const [viewportSpec, setViewportSpec] = useState<ViewportSpec>(CATALONIA_VIEWPORT);
+  /** Higher-resolution spec for the grid-based pipeline (up to 1024px). */
+  const [gridSpec, setGridSpec] = useState<ViewportSpec>(CATALONIA_VIEWPORT);
   const heatmapTimer = useRef<ReturnType<typeof setTimeout> | number>(0);
   const viewportDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -136,10 +139,9 @@ export default function App() {
     (w: number, s: number, e: number, n: number, zoom: number) => {
       if (viewportDebounce.current) clearTimeout(viewportDebounce.current);
       viewportDebounce.current = setTimeout(() => {
-        const spec = viewportSpecForZoom(w, s, e, n, zoom);
-        setViewportSpec(spec);
-        // Demand-load fine DEM tiles for this viewport; re-render heatmap if
-        // new tiles arrive.
+        setViewportSpec(viewportSpecForZoom(w, s, e, n, zoom));
+        setGridSpec(gridViewportSpecForZoom(w, s, e, n, zoom) as ViewportSpec);
+        // Demand-load fine DEM tiles for this viewport
         const targetM = Math.max(80, Math.min(3000, Math.round(15_000 / Math.pow(2, zoom - 8))));
         loadViewportTiles(w, s, e, n, targetM).then((anyNew) => {
           if (anyNew) setDemFineTileVersion((v) => v + 1);
@@ -197,35 +199,65 @@ export default function App() {
       return;
     }
 
-    // Schedule heatmap render during idle time
-    const run = () => {
-      const renderScores  = soloLayer ? heatmapScores : scores;
-      const renderLayers  = heatmapLayers;
-      const url = renderHeatmapImage(
-        municipalities,
-        renderScores,
-        municipalityData,
-        renderLayers,
-        configs,
-        viewportSpec,
-        {
-          customFormula: activeFormula,
+    let cancelled = false;
+
+    // Use the new grid-based async pipeline when no custom formula is active.
+    // Custom formula still uses the old per-pixel path for full compatibility.
+    const useGridPipeline = !activeFormula;
+
+    const run = async () => {
+      if (cancelled) return;
+
+      if (useGridPipeline) {
+        // ── New grid-based pipeline (higher-res spec) ────────────
+        const { w, s, e, n, cols, rows } = gridSpec;
+        const demSamples = isDemLoaded()
+          ? sampleDemViewport(w, s, e, n, cols, rows)
+          : null;
+
+        const result = await requestHeatmapRender({
+          municipalities,
+          municipalityData,
+          layers: heatmapLayers,
+          configs,
+          spec: gridSpec,
+          demSamples,
           disqualifiedMask: view.maskDisqualifiedAsBlack ? 'black' : 'transparent',
-        },
-      );
-      if (url) {
-        setHeatmapDataUrl(url);
-        setHeatmapBounds([viewportSpec.w, viewportSpec.s, viewportSpec.e, viewportSpec.n]);
+        });
+
+        if (cancelled || !result) return;
+        setHeatmapDataUrl(result.dataUrl);
+        setHeatmapBounds(result.bounds);
+      } else {
+        // ── Legacy per-pixel pipeline (custom formula) ──────────
+        const renderScores = soloLayer ? heatmapScores : scores;
+        const url = renderHeatmapImage(
+          municipalities,
+          renderScores,
+          municipalityData,
+          heatmapLayers,
+          configs,
+          viewportSpec,
+          {
+            customFormula: activeFormula,
+            disqualifiedMask: view.maskDisqualifiedAsBlack ? 'black' : 'transparent',
+          },
+        );
+        if (!cancelled && url) {
+          setHeatmapDataUrl(url);
+          setHeatmapBounds([viewportSpec.w, viewportSpec.s, viewportSpec.e, viewportSpec.n]);
+        }
       }
     };
 
     if ('requestIdleCallback' in window) {
-      heatmapTimer.current = requestIdleCallback(run, { timeout: 3000 });
+      heatmapTimer.current = requestIdleCallback(() => { run(); }, { timeout: 3000 });
     } else {
-      heatmapTimer.current = setTimeout(run, 200);
+      heatmapTimer.current = setTimeout(() => { run(); }, 200);
     }
 
     return () => {
+      cancelled = true;
       if (typeof heatmapTimer.current === 'number' && heatmapTimer.current) {
         if ('cancelIdleCallback' in window) {
           cancelIdleCallback(heatmapTimer.current);
@@ -234,7 +266,7 @@ export default function App() {
         }
       }
     };
-  }, [municipalities, scores, heatmapScores, heatmapLayers, municipalityData, layers, configs, municipalityCodes, demSlopeVersion, demFineTileVersion, viewportSpec, soloLayer, activeFormula, view.showHeatmap, view.maskDisqualifiedAsBlack]);
+  }, [municipalities, scores, heatmapScores, heatmapLayers, municipalityData, layers, configs, municipalityCodes, demSlopeVersion, demFineTileVersion, viewportSpec, gridSpec, soloLayer, activeFormula, view.showHeatmap, view.maskDisqualifiedAsBlack]);
 
   /** Compute point-based analysis score when an analysis point is set */
   const pointScore = useMemo(() => {
