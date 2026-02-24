@@ -7,6 +7,7 @@ import MapContainer from './components/MapContainer';
 import Sidebar from './components/Sidebar';
 import MunicipalityInfo from './components/MunicipalityInfo';
 import PointAnalysisPanel from './components/PointAnalysisPanel';
+import FormulaBar from './components/FormulaBar';
 import { useAppStore } from './store';
 import { useT } from './i18n';
 import { useResourceData } from './hooks/useResourceData';
@@ -221,6 +222,7 @@ export default function App() {
       <Sidebar />
       <MunicipalityInfo scores={scores} municipalityNames={municipalityNames} />
       <PointAnalysisPanel result={pointScore} />
+      <FormulaBar />
     </div>
   );
 }

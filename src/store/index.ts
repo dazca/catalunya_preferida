@@ -7,8 +7,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { LayerId, LayerMeta } from '../types';
-import type { LayerConfigs } from '../types/transferFunction';
-import { DEFAULT_LAYER_CONFIGS } from '../types/transferFunction';
+import type { LayerConfigs, VoteTerm } from '../types/transferFunction';
+import { DEFAULT_LAYER_CONFIGS, defaultTf } from '../types/transferFunction';
 import type { Lang } from '../i18n';
 
 /** Snapshot saved as a named preset. */
@@ -170,6 +170,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'better-idealista-config',
+      version: 1,
       // Persist everything except transient UI state
       partialize: (state) => ({
         layers: state.layers,
@@ -179,6 +180,25 @@ export const useAppStore = create<AppState>()(
         sidebarOpen: state.sidebarOpen,
         lang: state.lang,
       }),
+      /**
+       * Migrate from old votes config (axis + value) to multi-term format.
+       */
+      migrate: (persisted: unknown, version: number) => {
+        const state = persisted as Record<string, unknown>;
+        if (version === 0 && state.configs) {
+          const cfgs = state.configs as Record<string, unknown>;
+          const votes = cfgs.votes as Record<string, unknown> | undefined;
+          if (votes && !votes.terms) {
+            const axis = (votes.axis as string) || 'left-right';
+            const metric = axis === 'left-right' ? 'leftPct' : 'independencePct';
+            const value = votes.value || { enabled: true, tf: defaultTf(0, 100, false, 0) };
+            cfgs.votes = {
+              terms: [{ id: 'v1', metric, value }] as VoteTerm[],
+            };
+          }
+        }
+        return state as unknown as AppState;
+      },
     },
   ),
 );

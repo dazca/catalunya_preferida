@@ -11,7 +11,11 @@ import type {
   LayerConfigs,
   LayerTransferConfig,
   TransferFunction,
+  VoteTerm,
+  VoteMetric,
+  VOTE_METRIC_OPTIONS as _VMO,
 } from '../types/transferFunction';
+import { VOTE_METRIC_OPTIONS } from '../types/transferFunction';
 import CurveEditor from './CurveEditor';
 import WindRoseEditor from './WindRoseEditor';
 
@@ -207,6 +211,84 @@ function TfControls({
   );
 }
 
+// ── Vote terms editor ──────────────────────────────────────────────────
+
+/** Metric label lookup (no i18n key indirection needed inside the editor). */
+const METRIC_LABELS: Record<VoteMetric, string> = {
+  leftPct: 'Left %',
+  rightPct: 'Right %',
+  independencePct: 'Indep %',
+  unionistPct: 'Unionist %',
+  turnoutPct: 'Turnout %',
+};
+
+function VoteTermsEditor({
+  terms,
+  onChange,
+}: {
+  terms: VoteTerm[];
+  onChange: (terms: VoteTerm[]) => void;
+}) {
+  const t = useT();
+  const addTerm = () => {
+    const usedMetrics = new Set(terms.map((t) => t.metric));
+    const next = VOTE_METRIC_OPTIONS.find((o) => !usedMetrics.has(o.metric));
+    if (!next) return; // all metrics already added
+    const id = `v${Date.now()}`;
+    onChange([
+      ...terms,
+      { id, metric: next.metric, value: { enabled: true, tf: { plateauEnd: 0, decayEnd: 100, floor: 0, mandatory: false, multiplier: 1, invert: false } } },
+    ]);
+  };
+
+  const removeTerm = (id: string) => onChange(terms.filter((t) => t.id !== id));
+
+  const updateTerm = (id: string, patch: Partial<VoteTerm>) =>
+    onChange(terms.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+
+  return (
+    <div className="vote-terms-editor">
+      {terms.map((term) => (
+        <div key={term.id} className="vote-term">
+          <div className="vote-term-header">
+            <select
+              value={term.metric}
+              onChange={(e) => updateTerm(term.id, { metric: e.target.value as VoteMetric })}
+            >
+              {VOTE_METRIC_OPTIONS.map((opt) => (
+                <option key={opt.metric} value={opt.metric}>
+                  {METRIC_LABELS[opt.metric]}
+                </option>
+              ))}
+            </select>
+            {terms.length > 1 && (
+              <button
+                className="vote-term-remove"
+                onClick={() => removeTerm(term.id)}
+                title="Remove term"
+              >
+                x
+              </button>
+            )}
+          </div>
+          <TfControls
+            label={METRIC_LABELS[term.metric]}
+            ltc={term.value}
+            onChange={(ltc) => updateTerm(term.id, { value: ltc })}
+            rangeMax={100}
+            unit="%"
+          />
+        </div>
+      ))}
+      {terms.length < VOTE_METRIC_OPTIONS.length && (
+        <button className="vote-term-add" onClick={addTerm}>
+          + {t('fc.votes.addTerm' as keyof Translations)}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── Per-layer filter controls ──────────────────────────────────────────
 
 function FilterControls({
@@ -274,32 +356,10 @@ function FilterControls({
 
     case 'votes':
       return (
-        <>
-          <label>
-            {t('fc.votes.axis')}:
-            <select
-              value={configs.votes.axis}
-              onChange={(e) =>
-                updateConfig('votes', {
-                  ...configs.votes,
-                  axis: e.target.value as 'left-right' | 'independence',
-                })
-              }
-            >
-              <option value="left-right">{t('fc.votes.axis.lr')}</option>
-              <option value="independence">{t('fc.votes.axis.ind')}</option>
-            </select>
-          </label>
-          <TfControls
-            label={configs.votes.axis === 'left-right' ? t('fc.votes.lr') : t('fc.votes.ind')}
-            ltc={configs.votes.value}
-            onChange={(ltc) =>
-              updateConfig('votes', { ...configs.votes, value: ltc })
-            }
-            rangeMax={100}
-            unit="%"
-          />
-        </>
+        <VoteTermsEditor
+          terms={configs.votes.terms}
+          onChange={(terms) => updateConfig('votes', { terms })}
+        />
       );
 
     case 'transit':

@@ -103,6 +103,19 @@ export interface Translations {
   'fc.votes.axis.ind': string;
   'fc.votes.lr': string;
   'fc.votes.ind': string;
+  'fc.votes.addTerm': string;
+
+  // ── Vote metrics ────────────────────────────────────────────────────
+  'vote.metric.left': string;
+  'vote.metric.right': string;
+  'vote.metric.indep': string;
+  'vote.metric.union': string;
+  'vote.metric.turnout': string;
+
+  // ── Formula Bar ─────────────────────────────────────────────────────
+  'fb.show': string;
+  'fb.hide': string;
+  'fb.addLayer': string;
 
   // ── FilterControls (other layers) ─────────────────────────────────
   'fc.transit.dist': string;
@@ -217,6 +230,17 @@ const CA: Translations = {
   'fc.votes.axis.ind': 'Independencia / Unionisme',
   'fc.votes.lr': '% Esquerres',
   'fc.votes.ind': '% Independentisme',
+  'fc.votes.addTerm': '+ Afegir metrica',
+
+  'vote.metric.left': 'Esquerres %',
+  'vote.metric.right': 'Dretes %',
+  'vote.metric.indep': 'Independentisme %',
+  'vote.metric.union': 'Unionisme %',
+  'vote.metric.turnout': 'Participacio %',
+
+  'fb.show': 'Formula',
+  'fb.hide': 'Amaga',
+  'fb.addLayer': 'Afegir capa',
 
   'fc.transit.dist': "Distancia a l'estacio",
   'fc.forest.cover': 'Cobertura forestal',
@@ -328,6 +352,17 @@ const EN: Translations = {
   'fc.votes.axis.ind': 'Independence / Unionist',
   'fc.votes.lr': 'Left-wing %',
   'fc.votes.ind': 'Independence %',
+  'fc.votes.addTerm': '+ Add metric',
+
+  'vote.metric.left': 'Left-wing %',
+  'vote.metric.right': 'Right-wing %',
+  'vote.metric.indep': 'Independence %',
+  'vote.metric.union': 'Unionist %',
+  'vote.metric.turnout': 'Turnout %',
+
+  'fb.show': 'Formula',
+  'fb.hide': 'Hide',
+  'fb.addLayer': 'Add layer',
 
   'fc.transit.dist': 'Distance to station',
   'fc.forest.cover': 'Forest cover',

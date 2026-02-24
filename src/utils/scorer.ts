@@ -129,9 +129,13 @@ const SCORERS: Record<LayerId, LayerScorer> = {
   votes: (codi, configs, data) => {
     const v = data.votes[normalizeIne(codi)];
     if (!v) return undefined;
-    const raw =
-      configs.votes.axis === 'left-right' ? v.leftPct : v.independencePct;
-    return combineSubScores([scoreSingleTf(raw, configs.votes.value)]);
+    const terms = configs.votes.terms;
+    if (!terms || terms.length === 0) return undefined;
+    const subs = terms.map((term) => {
+      const raw = v[term.metric] as number | undefined;
+      return scoreSingleTf(raw, term.value);
+    });
+    return combineSubScores(subs);
   },
 
   transit: (codi, configs, data) => {

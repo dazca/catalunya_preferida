@@ -1,0 +1,300 @@
+/* ================================================================== */
+/*  Formula Bar – bottom-docked scoring formula visualizer             */
+/* ================================================================== */
+.formula-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 1100;
+  background: #080a10ee;
+  backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(255,255,255,0.07);
+  box-shadow: 0 -4px 32px rgba(0,0,0,0.6);
+  transition: transform 0.22s cubic-bezier(0.4,0,0.2,1);
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+.formula-bar.collapsed {
+  transform: translateY(calc(100% - 32px));
+}
+
+/* Toggle tab at top edge */
+.formula-bar-toggle {
+  position: absolute;
+  top: -28px;
+  right: 20px;
+  padding: 4px 14px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: #080a10ee;
+  color: #7a839e;
+  cursor: pointer;
+  transition: color 0.14s, background 0.14s;
+}
+.formula-bar-toggle:hover {
+  color: #6366f1;
+  background: #0f1118;
+}
+
+/* Inner content */
+.formula-bar-inner {
+  padding: 10px 16px 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.1) transparent;
+}
+.formula-bar-inner::-webkit-scrollbar { height: 3px; }
+.formula-bar-inner::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+/* "Score =" label */
+.fb-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #7a839e;
+  white-space: nowrap;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+/* Each layer term */
+.fb-term {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: border-color 0.14s, background 0.14s;
+}
+.fb-term:hover {
+  border-color: rgba(99,102,241,0.4);
+  background: rgba(99,102,241,0.06);
+}
+.fb-term.disabled {
+  opacity: 0.35;
+}
+
+/* Operator between terms */
+.fb-op {
+  font-size: 12px;
+  color: #464f65;
+  flex-shrink: 0;
+  padding: 0 2px;
+}
+
+/* Layer icon */
+.fb-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+/* Layer name */
+.fb-name {
+  font-size: 10px;
+  font-weight: 600;
+  color: #d9dff0;
+  cursor: pointer;
+  transition: color 0.14s;
+  user-select: none;
+}
+.fb-name:hover {
+  color: #6366f1;
+}
+
+/* Editable weight input */
+.fb-weight {
+  width: 34px;
+  padding: 1px 3px;
+  font-size: 10px;
+  font-family: inherit;
+  text-align: center;
+  background: rgba(99,102,241,0.12);
+  border: 1px solid rgba(99,102,241,0.3);
+  border-radius: 3px;
+  color: #a5b4fc;
+  outline: none;
+  transition: border-color 0.14s;
+}
+.fb-weight:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 6px rgba(99,102,241,0.3);
+}
+
+/* Sub-parameters in parens */
+.fb-params {
+  font-size: 9px;
+  color: #7a839e;
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.fb-param-tag {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.06);
+  font-size: 9px;
+  color: #7a839e;
+}
+
+/* [+] button */
+.fb-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px dashed rgba(99,102,241,0.4);
+  background: transparent;
+  color: #6366f1;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.14s;
+}
+.fb-add-btn:hover {
+  background: rgba(99,102,241,0.12);
+  border-color: #6366f1;
+}
+
+/* Add-term dropdown */
+.fb-add-dropdown {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: 16px;
+  background: #0f1118;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  padding: 6px 0;
+  min-width: 200px;
+  box-shadow: 0 -8px 32px rgba(0,0,0,0.7);
+  z-index: 10;
+}
+.fb-add-dropdown-title {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #464f65;
+  padding: 6px 12px 4px;
+}
+.fb-add-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  font-size: 12px;
+  color: #d9dff0;
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  transition: background 0.1s;
+}
+.fb-add-dropdown-item:hover {
+  background: rgba(99,102,241,0.12);
+}
+.fb-add-dropdown-item .fb-dd-icon {
+  font-size: 14px;
+  width: 20px;
+  text-align: center;
+}
+.fb-add-dropdown-item.disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* Vote term tag (removable) inside formula */
+.fb-vote-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(34,197,94,0.12);
+  border: 1px solid rgba(34,197,94,0.25);
+  font-size: 9px;
+  color: #86efac;
+  cursor: default;
+}
+.fb-vote-remove {
+  font-size: 8px;
+  cursor: pointer;
+  color: #86efac;
+  padding: 0 2px;
+  opacity: 0.6;
+  transition: opacity 0.14s;
+}
+.fb-vote-remove:hover {
+  opacity: 1;
+}
+
+/* Vote add inside formula */
+.fb-vote-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px dashed rgba(34,197,94,0.4);
+  background: transparent;
+  color: #22c55e;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.14s;
+  flex-shrink: 0;
+}
+.fb-vote-add:hover {
+  background: rgba(34,197,94,0.12);
+  border-color: #22c55e;
+}
+
+/* Vote metric picker popover */
+.fb-vote-picker {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  background: #0f1118;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  padding: 4px 0;
+  min-width: 160px;
+  box-shadow: 0 -8px 24px rgba(0,0,0,0.6);
+  z-index: 11;
+}
+.fb-vote-picker button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 12px;
+  font-size: 11px;
+  border: none;
+  background: none;
+  color: #d9dff0;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.fb-vote-picker button:hover {
+  background: rgba(34,197,94,0.12);
+}
+.fb-vote-picker button.disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}

@@ -110,10 +110,14 @@ function scorePointLayer(
     case 'votes': {
       const v = codi ? data.votes[codi] : undefined;
       if (!v) return undefined;
-      const raw =
-        configs.votes.axis === 'left-right' ? v.leftPct : v.independencePct;
-      rawValues.votePct = raw;
-      return combineSubScores([scoreSingleTf(raw, configs.votes.value)]);
+      const terms = configs.votes.terms;
+      if (!terms || terms.length === 0) return undefined;
+      const subs = terms.map((term) => {
+        const raw = v[term.metric] as number | undefined;
+        if (raw !== undefined) rawValues[`vote_${term.metric}`] = raw;
+        return scoreSingleTf(raw, term.value);
+      });
+      return combineSubScores(subs);
     }
 
     case 'transit':

@@ -76,6 +76,33 @@ export interface AspectPreferences {
   NW: number;
 }
 
+/** Available vote metric keys mapped to VoteSentiment fields. */
+export type VoteMetric =
+  | 'leftPct'
+  | 'rightPct'
+  | 'independencePct'
+  | 'unionistPct'
+  | 'turnoutPct';
+
+/** A single vote scoring term the user can add to the formula. */
+export interface VoteTerm {
+  /** Unique id within the terms array (nanoid-style or sequential). */
+  id: string;
+  /** Which vote metric this term evaluates. */
+  metric: VoteMetric;
+  /** Transfer function config for this metric. */
+  value: LayerTransferConfig;
+}
+
+/** Human-readable labels per VoteMetric (used in i18n). */
+export const VOTE_METRIC_OPTIONS: { metric: VoteMetric; labelKey: string }[] = [
+  { metric: 'leftPct', labelKey: 'vote.metric.left' },
+  { metric: 'rightPct', labelKey: 'vote.metric.right' },
+  { metric: 'independencePct', labelKey: 'vote.metric.indep' },
+  { metric: 'unionistPct', labelKey: 'vote.metric.union' },
+  { metric: 'turnoutPct', labelKey: 'vote.metric.turnout' },
+];
+
 /**
  * Complete filter configuration for all layers.
  * Quantitative layers use TransferFunction; terrain aspect uses wind-rose.
@@ -89,8 +116,8 @@ export interface LayerConfigs {
     aspectWeight?: number;
   };
   votes: {
-    axis: 'left-right' | 'independence';
-    value: LayerTransferConfig;
+    /** Multi-term vote scoring. Each term evaluates a different metric. */
+    terms: VoteTerm[];
   };
   transit: LayerTransferConfig;
   forest: LayerTransferConfig;
@@ -144,8 +171,9 @@ export const DEFAULT_LAYER_CONFIGS: LayerConfigs = {
     aspectWeight: 1,
   },
   votes: {
-    axis: 'left-right',
-    value: { enabled: true, tf: defaultTf(0, 100, false, 0) },
+    terms: [
+      { id: 'v1', metric: 'leftPct', value: { enabled: true, tf: defaultTf(0, 100, false, 0) } },
+    ],
   },
   transit: { enabled: true, tf: defaultTf(5, 25, true, 0.1) },
   forest: { enabled: true, tf: defaultTf(10, 80, false, 0) },
