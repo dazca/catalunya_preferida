@@ -1,0 +1,40 @@
+{
+  "name": "better_idealista",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "bootstrap:data": "node scripts/bootstrap-data.mjs",
+    "bootstrap:data:force": "node scripts/bootstrap-data.mjs --force",
+    "setup:dev": "npm install && npm run bootstrap:data",
+    "download": "node scripts/download-all.mjs",
+    "deploy": "npm run build && node upload.mjs"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/geojson": "^7946.0.16",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/ssh2": "^1.15.5",
+    "@vitejs/plugin-react": "^5.1.4",
+    "jsdom": "^28.1.0",
+    "ssh2-sftp-client": "^12.0.1",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.1",
+    "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.90.21",
+    "@turf/turf": "^7.3.4",
+    "maplibre-gl": "^5.19.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "zustand": "^5.0.11"
+  }
+}

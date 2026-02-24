@@ -1,0 +1,67 @@
+/**
+ * @file Styles for the WindRoseEditor polar chart component.
+ */
+
+.wind-rose-editor {
+  width: 160px;
+  height: 160px;
+  display: block;
+  margin: 4px auto;
+  user-select: none;
+}
+
+/* Reference circles */
+.wr-ring {
+  fill: none;
+  stroke: #2a2f3e;
+  stroke-width: 0.5;
+}
+
+/* Direction axis lines from center */
+.wr-axis {
+  stroke: #333;
+  stroke-width: 0.5;
+}
+
+/* Petal polygon */
+.wr-petal {
+  fill: rgba(76, 175, 80, 0.25);
+  stroke: #66bb6a;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+/* Direction labels */
+.wr-dir-label {
+  font-size: 8px;
+  fill: #999;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.wr-south {
+  fill: #ffa726;
+  font-weight: bold;
+}
+
+/* Draggable handles */
+.wr-handle {
+  fill: #66bb6a;
+  stroke: #fff;
+  stroke-width: 1.5;
+  cursor: grab;
+  opacity: 0.85;
+  transition: r 0.1s;
+}
+
+.wr-handle:hover,
+.wr-handle.active {
+  cursor: grabbing;
+  r: 7;
+  opacity: 1;
+}
+
+/* Center dot */
+.wr-center {
+  fill: #555;
+}

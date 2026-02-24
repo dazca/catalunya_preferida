@@ -1,0 +1,52 @@
+.municipality-info {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 1000;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  padding: 16px 20px;
+  min-width: 220px;
+  max-width: 320px;
+}
+
+.mi-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: #888;
+}
+
+.mi-name {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.mi-score {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.mi-score-label {
+  font-size: 12px;
+  color: #777;
+}
+
+.mi-score-value {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.mi-code {
+  font-size: 11px;
+  color: #aaa;
+  margin: 4px 0 0;
+}

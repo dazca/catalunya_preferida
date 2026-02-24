@@ -1,0 +1,93 @@
+/* -- ViewMenu floating panel -- */
+
+.view-menu {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+  background: rgba(24, 24, 32, 0.92);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: 10px;
+  padding: 10px 14px 12px;
+  color: #e0e0e8;
+  font-size: 12px;
+  min-width: 180px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  user-select: none;
+}
+
+.vm-title {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #b0b8d0;
+  text-transform: uppercase;
+}
+
+/* -- Sections -- */
+.vm-section {
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+.vm-section:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+.vm-section-label {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #7a80a0;
+  margin-bottom: 4px;
+}
+
+/* -- Toggle rows -- */
+.vm-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  cursor: pointer;
+}
+.vm-toggle input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: #5b9cf6;
+  cursor: pointer;
+  margin: 0;
+}
+.vm-toggle-label {
+  flex: 1;
+  font-size: 12px;
+}
+
+/* -- Sliders -- */
+.vm-slider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0 2px 22px;
+}
+.vm-slider-label {
+  font-size: 11px;
+  color: #9098b0;
+  min-width: 70px;
+}
+.vm-slider input[type="range"] {
+  flex: 1;
+  height: 3px;
+  accent-color: #5b9cf6;
+  cursor: pointer;
+}
+.vm-slider-value {
+  font-size: 10px;
+  color: #7a80a0;
+  min-width: 28px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

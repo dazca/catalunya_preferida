@@ -1,0 +1,137 @@
+/**
+ * @file Styles for the CurveEditor SVG interactive component.
+ */
+
+.curve-editor {
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+  display: block;
+  margin: 2px 0;
+  user-select: none;
+  cursor: default;
+}
+
+/* Plot background */
+.ce-bg {
+  fill: #1a1f2e;
+  stroke: #333;
+  stroke-width: 0.5;
+}
+
+/* Grid lines */
+.ce-grid {
+  stroke: #333a4f;
+  stroke-width: 0.5;
+}
+
+/* Axis labels */
+.ce-label {
+  font-size: 8px;
+  fill: #a9b1cb;
+}
+
+.ce-label-y {
+  text-anchor: end;
+}
+
+.ce-label-x {
+  text-anchor: middle;
+}
+
+/* Data distribution markers */
+.ce-iqr {
+  fill: rgba(100, 149, 237, 0.12);
+}
+
+.ce-median {
+  stroke: rgba(100, 149, 237, 0.5);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+
+.ce-minmax {
+  stroke: rgba(100, 149, 237, 0.4);
+  stroke-width: 1.5;
+}
+
+/* Curve */
+.ce-curve {
+  fill: none;
+  stroke: #67d2ff;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Zone vertical lines */
+.ce-zone-line {
+  stroke: #8b94b0;
+  stroke-width: 0.5;
+}
+
+/* Floor line */
+.ce-floor-line {
+  stroke: #ef5350;
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+  opacity: 0.6;
+}
+
+/* Draggable handles */
+.ce-handle {
+  cursor: grab;
+  stroke-width: 2;
+  transition: r 0.15s, opacity 0.15s;
+}
+
+.ce-handle:hover,
+.ce-handle.active {
+  cursor: grabbing;
+  opacity: 1;
+}
+
+.ce-handle-plateau {
+  fill: #66bb6a;
+  stroke: #fff;
+  opacity: 0.85;
+}
+
+.ce-handle-decay {
+  fill: #ef5350;
+  stroke: #fff;
+  opacity: 0.85;
+}
+
+.ce-handle-floor {
+  fill: #ffa726;
+  stroke: #fff;
+  stroke-width: 1.5;
+  opacity: 0.85;
+  cursor: ns-resize;
+}
+
+.ce-handle-floor:hover,
+.ce-handle-floor.active {
+  cursor: ns-resize;
+}
+
+/* Handle labels */
+.ce-handle-label {
+  font-size: 7px;
+  fill: #d5d9ea;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.ce-floor-label {
+  text-anchor: start;
+  font-size: 7px;
+}
+
+/* Invert badge */
+.ce-invert-badge {
+  font-size: 7px;
+  fill: #ffa726;
+  font-weight: bold;
+}
