@@ -4,26 +4,53 @@
  */
 
 const CHUNK = 100;
-const MAX_RETRIES = 5;
-const BASE_DELAY_MS = 500;
+const MAX_RETRIES = 6;
+const BASE_DELAY_MS = 1500;
+const INTER_CHUNK_DELAY_MS = 350;
+
+/** Sleep helper. */
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * Parse Retry-After header value (seconds or HTTP-date).
+ * Returns milliseconds to wait, or null if unparseable.
+ */
+function parseRetryAfter(header: string | null): number | null {
+  if (!header) return null;
+  const secs = Number(header);
+  if (Number.isFinite(secs) && secs > 0) return secs * 1000;
+  // Try HTTP-date (e.g. "Wed, 21 Oct 2015 07:28:00 GMT")
+  const date = Date.parse(header);
+  if (Number.isFinite(date)) {
+    const delta = date - Date.now();
+    return delta > 0 ? delta : 1000;
+  }
+  return null;
+}
 
 /**
  * Fetch a single chunk with retry on 429 rate-limit.
+ * Reports delays via optional onWait callback.
  */
-async function fetchChunkWithRetry(url: string): Promise<Response> {
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+async function fetchChunkWithRetry(
+  url: string,
+  onWait?: (msg: string) => void,
+): Promise<Response> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const resp = await fetch(url);
-    if (resp.status === 429) {
-      const retryAfter = resp.headers.get('Retry-After');
-      const delayMs = retryAfter
-        ? parseInt(retryAfter, 10) * 1000
-        : BASE_DELAY_MS * Math.pow(2, attempt);
-      await new Promise((r) => setTimeout(r, delayMs));
-      continue;
+    if (resp.status !== 429) return resp;
+
+    if (attempt === MAX_RETRIES) {
+      return resp; // give up, return the 429
     }
-    return resp;
+
+    const retryMs = parseRetryAfter(resp.headers.get('Retry-After'))
+      ?? BASE_DELAY_MS * Math.pow(2, attempt);
+    const delaySec = (retryMs / 1000).toFixed(1);
+    onWait?.(`Rate-limited (429). Retry ${attempt + 1}/${MAX_RETRIES} in ${delaySec}s…`);
+    await sleep(retryMs);
   }
-  // Final attempt without catch
+  // Unreachable, but satisfies TS
   return fetch(url);
 }
 
@@ -39,6 +66,7 @@ export async function fetchElevationGrid(
   lonMax: number,
   res: number,
   onProgress?: (fetched: number, total: number) => void,
+  onStatus?: (msg: string) => void,
 ): Promise<ElevationResult> {
   const N = res;
   const lats: string[] = [];
@@ -65,8 +93,8 @@ export async function fetchElevationGrid(
     const chunkLons = lons.slice(i, i + CHUNK).join(',');
     const url = `https://api.open-meteo.com/v1/elevation?latitude=${chunkLats}&longitude=${chunkLons}`;
 
-    const resp = await fetchChunkWithRetry(url);
-    if (!resp.ok) throw new Error(`API returned ${resp.status}`);
+    const resp = await fetchChunkWithRetry(url, onStatus);
+    if (!resp.ok) throw new Error(`API returned ${resp.status} after ${MAX_RETRIES} retries`);
     const data = await resp.json();
 
     const elev: (number | null)[] = data.elevation;
@@ -77,8 +105,8 @@ export async function fetchElevationGrid(
     fetched += elev.length;
     onProgress?.(fetched, total);
 
-    // Rate-limit courtesy delay between chunks
-    if (i + CHUNK < total) await new Promise((r) => setTimeout(r, 120));
+    // Courtesy delay between chunks to avoid triggering 429
+    if (i + CHUNK < total) await sleep(INTER_CHUNK_DELAY_MS);
   }
 
   return { dem: elevations, N };

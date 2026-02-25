@@ -31,7 +31,7 @@ export default function CataloniaTab() {
   const [latMax, setLatMax] = useState<number>(PRESETS.pyrenees.latMax);
   const [lonMin, setLonMin] = useState<number>(PRESETS.pyrenees.lonMin);
   const [lonMax, setLonMax] = useState<number>(PRESETS.pyrenees.lonMax);
-  const [resolution, setResolution] = useState(100);
+  const [resolution, setResolution] = useState(50);
   const [prefAz, setPrefAz] = useState(180);
   const [prefStr, setPrefStr] = useState(100);
   const [slopeW, setSlopeW] = useState(0);
@@ -63,7 +63,11 @@ export default function CataloniaTab() {
     setStats([]);
     setAsserts([]);
     try {
-      const { dem: elevations, N } = await fetchElevationGrid(latMin, latMax, lonMin, lonMax, resolution, (done, tot) => setProgress(`Fetching ${done}/${tot} points…`));
+      const { dem: elevations, N } = await fetchElevationGrid(
+        latMin, latMax, lonMin, lonMax, resolution,
+        (done, tot) => setProgress(`Fetching ${done}/${tot} points…`),
+        (msg) => setProgress(msg),
+      );
       setProgress('Computing aspect & slope…');
       const { aspect, slope } = computeAspectSlope(elevations, N);
       const suit = computeSuitability(aspect, slope, N, prefAz, prefStr / 100, slopeW / 100);
