@@ -107,3 +107,46 @@ export function scoreAspect(aspect: string, prefs: AspectPreferences): number {
   const key = aspect.toUpperCase() as keyof AspectPreferences;
   return prefs[key] ?? 0.5;
 }
+
+/* ── Wind-rose direction order for interpolation ──────────────────── */
+const WIND_ROSE_KEYS: readonly (keyof AspectPreferences)[] =
+  ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;
+
+/**
+ * Score a continuous aspect angle (0-360°) with smooth cosine interpolation
+ * between the two nearest wind-rose directions.
+ *
+ * @param angleDeg - Aspect angle in degrees, 0°=N clockwise (0-360)
+ * @param prefs - Wind-rose aspect preferences (0-1 per direction)
+ * @returns Score 0-1
+ */
+export function scoreAspectAngle(angleDeg: number, prefs: AspectPreferences): number {
+  // Normalise to [0, 360)
+  let a = angleDeg % 360;
+  if (a < 0) a += 360;
+
+  const sector = Math.floor(a / 45);         // 0-7
+  const frac   = (a - sector * 45) / 45;     // [0, 1) position within sector
+
+  const w0 = prefs[WIND_ROSE_KEYS[sector]];
+  const w1 = prefs[WIND_ROSE_KEYS[(sector + 1) % 8]];
+
+  // Cosine interpolation: smooth blend between neighbours
+  const t = 0.5 * (1 - Math.cos(frac * Math.PI));
+  return w0 * (1 - t) + w1 * t;
+}
+
+/**
+ * Build a 256-entry LUT mapping aspect codes (0-255) to scores
+ * using smooth cosine interpolation between wind-rose preferences.
+ *
+ * @param prefs - Wind-rose aspect preferences
+ * @returns Float32Array of 256 interpolated scores
+ */
+export function buildAspectScoreLut(prefs: AspectPreferences): Float32Array {
+  const lut = new Float32Array(256);
+  for (let i = 0; i < 256; i++) {
+    lut[i] = scoreAspectAngle(i * 360 / 256, prefs);
+  }
+  return lut;
+}

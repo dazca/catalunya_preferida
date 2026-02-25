@@ -8,8 +8,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { scoreToRgba, scoreToCssColor, getTurboLut } from '../utils/turboColormap';
-import { evaluateTransferFunction } from '../utils/transferFunction';
-import type { TransferFunction } from '../types/transferFunction';
+import { evaluateTransferFunction, scoreAspectAngle } from '../utils/transferFunction';
+import type { TransferFunction, AspectPreferences } from '../types/transferFunction';
 
 /* ── Horn kernel helper (pure replica of demSlope logic) ────────── */
 
@@ -298,5 +298,117 @@ describe('known-location slope expectations', () => {
     const score = evaluateTransferFunction(40, slopeTf); // 40° extreme slope
     const [r, g] = scoreToRgba(score);
     expect(r).toBeGreaterThan(g); // red dominates
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════ */
+/*  7. ASPECT DIRECTION TESTS                                        */
+/* ══════════════════════════════════════════════════════════════════ */
+
+/**
+ * Compute aspect bearing (downhill direction) using the corrected formula:
+ *   bearing = atan2(-dzdx, dzdy)
+ * where +px = east, +py = south in Mercator tile coords.
+ */
+function hornAspectDeg(neighbourhood: number[], cellW: number, cellH: number): number {
+  const [a, b, c, d, _e, f, g, h, i] = neighbourhood;
+  const dzdx = ((c + 2 * f + i) - (a + 2 * d + g)) / (8 * cellW);
+  const dzdy = ((g + 2 * h + i) - (a + 2 * b + c)) / (8 * cellH);
+  let deg = Math.atan2(-dzdx, dzdy) * (180 / Math.PI);
+  if (deg < 0) deg += 360;
+  return deg;
+}
+
+/** Convert aspect degrees to 256-step code like sampleDemViewport does. */
+function aspectDegToCode(deg: number): number {
+  return Math.round(deg * 256 / 360) & 0xFF;
+}
+
+describe('Aspect direction (downhill bearing)', () => {
+  const CELL = 228;
+
+  it('south-facing slope (elev high N, low S) → aspect ≈ 180° (S)', () => {
+    // Top row (north) high, bottom row (south) low
+    const southFacing = [300, 300, 300, 200, 200, 200, 100, 100, 100];
+    const deg = hornAspectDeg(southFacing, CELL, CELL);
+    expect(deg).toBeCloseTo(180, 0); // south
+    expect(aspectDegToCode(deg)).toBeCloseTo(128, 2); // code 128 = S
+  });
+
+  it('north-facing slope (elev high S, low N) → aspect ≈ 0°/360° (N)', () => {
+    const northFacing = [100, 100, 100, 200, 200, 200, 300, 300, 300];
+    const deg = hornAspectDeg(northFacing, CELL, CELL);
+    // 0° or 360° — both valid for North
+    expect(deg < 5 || deg > 355).toBe(true);
+  });
+
+  it('east-facing slope (elev high W, low E) → aspect ≈ 90° (E)', () => {
+    const eastFacing = [300, 200, 100, 300, 200, 100, 300, 200, 100];
+    const deg = hornAspectDeg(eastFacing, CELL, CELL);
+    expect(deg).toBeCloseTo(90, 0);
+    expect(aspectDegToCode(deg)).toBeCloseTo(64, 2); // code 64 = E
+  });
+
+  it('west-facing slope (elev high E, low W) → aspect ≈ 270° (W)', () => {
+    const westFacing = [100, 200, 300, 100, 200, 300, 100, 200, 300];
+    const deg = hornAspectDeg(westFacing, CELL, CELL);
+    expect(deg).toBeCloseTo(270, 0);
+    expect(aspectDegToCode(deg)).toBeCloseTo(192, 2); // code 192 = W
+  });
+
+  it('flat terrain → aspect is arbitrary but slope ≈ 0', () => {
+    const flat = [100, 100, 100, 100, 100, 100, 100, 100, 100];
+    const slope = hornSlope(flat, CELL, CELL);
+    expect(slope).toBeCloseTo(0, 6);
+    // Aspect is undefined for flat terrain — no direction assertion needed
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════ */
+/*  8. ASPECT SCORING WITH WIND ROSE                                 */
+/* ══════════════════════════════════════════════════════════════════ */
+
+describe('Aspect scoring integration', () => {
+  // User prefers South (1.0), progressively less toward North (0.0)
+  const prefs: AspectPreferences = {
+    N: 0.0, NE: 0.3, E: 0.5, SE: 0.8, S: 1.0, SW: 0.8, W: 0.5, NW: 0.3,
+  };
+
+  it('south-facing slope → best score (1.0)', () => {
+    const score = scoreAspectAngle(180, prefs);
+    expect(score).toBeCloseTo(1.0, 5);
+  });
+
+  it('north-facing slope → worst score (0.0)', () => {
+    const score = scoreAspectAngle(0, prefs);
+    expect(score).toBeCloseTo(0.0, 5);
+  });
+
+  it('SE-facing slope → high score (0.8)', () => {
+    const score = scoreAspectAngle(135, prefs);
+    expect(score).toBeCloseTo(0.8, 5);
+  });
+
+  it('E-facing slope → moderate score (0.5)', () => {
+    const score = scoreAspectAngle(90, prefs);
+    expect(score).toBeCloseTo(0.5, 5);
+  });
+
+  it('W-facing slope → moderate score (0.5)', () => {
+    const score = scoreAspectAngle(270, prefs);
+    expect(score).toBeCloseTo(0.5, 5);
+  });
+
+  it('transition S→SW is smooth (not stepwise)', () => {
+    // 190° is slightly past S toward SW
+    const s190 = scoreAspectAngle(190, prefs);
+    // Should be between S(1.0) and SW(0.8), close to S
+    expect(s190).toBeGreaterThan(0.8);
+    expect(s190).toBeLessThan(1.01);
+
+    // 210° is further toward SW
+    const s210 = scoreAspectAngle(210, prefs);
+    expect(s210).toBeGreaterThan(0.79);
+    expect(s210).toBeLessThan(s190); // monotonically decreasing toward SW
   });
 });

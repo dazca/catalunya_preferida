@@ -27,6 +27,7 @@
  *   - Total with membership raster (cached): ~40ms
  */
 import type { TransferFunction, LayerConfigs, AspectPreferences } from '../types/transferFunction';
+import { buildAspectScoreLut } from './transferFunction';
 import type { LayerMeta } from '../types';
 import type { LayerId } from '../types';
 import { acquireFloat32, releaseFloat32 } from './variableGrids';
@@ -237,20 +238,17 @@ export function buildDisqualificationMask(
 /* ── Aspect scoring grid ────────────────────────────────────────────── */
 
 /**
- * Score aspect values (0-7 encoded) through wind-rose preferences.
+ * Score aspect values (0-255 encoded angles) through wind-rose preferences
+ * with smooth cosine interpolation between adjacent directions.
  */
 export function scoreAspectGrid(
   aspects: Uint8Array,
   prefs: AspectPreferences,
   out: Float32Array,
 ): void {
-  const labels = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;
-  const lut = new Float32Array(8);
-  for (let i = 0; i < 8; i++) {
-    lut[i] = prefs[labels[i]] ?? 0.5;
-  }
+  const lut = buildAspectScoreLut(prefs);
   for (let i = 0; i < aspects.length; i++) {
-    out[i] = lut[aspects[i] & 7];
+    out[i] = lut[aspects[i]];
   }
 }
 

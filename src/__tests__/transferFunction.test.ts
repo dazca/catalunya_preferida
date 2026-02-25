@@ -6,6 +6,8 @@ import {
   evaluateTransferFunction,
   computeDataStats,
   scoreAspect,
+  scoreAspectAngle,
+  buildAspectScoreLut,
 } from '../utils/transferFunction';
 import type { TransferFunction, AspectPreferences } from '../types/transferFunction';
 
@@ -150,5 +152,70 @@ describe('scoreAspect', () => {
 
   it('returns 0.5 for unknown direction', () => {
     expect(scoreAspect('XYZ', prefs)).toBe(0.5);
+  });
+});
+
+describe('scoreAspectAngle (smooth interpolation)', () => {
+  const prefs: AspectPreferences = {
+    N: 0.2, NE: 0.4, E: 0.6, SE: 0.8, S: 1.0, SW: 0.8, W: 0.6, NW: 0.4,
+  };
+
+  it('exact cardinal directions match discrete scoreAspect', () => {
+    expect(scoreAspectAngle(0, prefs)).toBeCloseTo(0.2, 5);    // N
+    expect(scoreAspectAngle(90, prefs)).toBeCloseTo(0.6, 5);   // E
+    expect(scoreAspectAngle(180, prefs)).toBeCloseTo(1.0, 5);  // S
+    expect(scoreAspectAngle(270, prefs)).toBeCloseTo(0.6, 5);  // W
+  });
+
+  it('midpoint between two directions is their cosine-blended average', () => {
+    // Midway N(0.2) → NE(0.4) at 22.5°: cosine interp at t=0.5 → (0.2+0.4)/2 = 0.3
+    const mid = scoreAspectAngle(22.5, prefs);
+    expect(mid).toBeCloseTo(0.3, 2);
+  });
+
+  it('¼ point uses cosine blend (not linear)', () => {
+    // At 11.25° (¼ of 45°), t = 0.5*(1-cos(π/4)) ≈ 0.146
+    // score = 0.2 * (1-0.146) + 0.4 * 0.146 ≈ 0.229
+    const q1 = scoreAspectAngle(11.25, prefs);
+    expect(q1).toBeGreaterThan(0.2);
+    expect(q1).toBeLessThan(0.3); // closer to N than linear would give
+  });
+
+  it('wraps around 360° correctly', () => {
+    // 350° is between NW(315°) and N(360°/0°)
+    const score350 = scoreAspectAngle(350, prefs);
+    expect(score350).toBeGreaterThan(Math.min(prefs.NW, prefs.N) - 0.01);
+    expect(score350).toBeLessThan(Math.max(prefs.NW, prefs.N) + 0.01);
+  });
+
+  it('negative angles are normalised', () => {
+    expect(scoreAspectAngle(-90, prefs)).toBeCloseTo(scoreAspectAngle(270, prefs), 5);
+  });
+});
+
+describe('buildAspectScoreLut', () => {
+  const prefs: AspectPreferences = {
+    N: 0.0, NE: 0.5, E: 1.0, SE: 0.5, S: 0.0, SW: 0.5, W: 1.0, NW: 0.5,
+  };
+
+  it('returns 256 entries', () => {
+    const lut = buildAspectScoreLut(prefs);
+    expect(lut.length).toBe(256);
+  });
+
+  it('exact direction indices match preferences', () => {
+    const lut = buildAspectScoreLut(prefs);
+    expect(lut[0]).toBeCloseTo(0.0, 2);     // N  = 0°  → code 0
+    expect(lut[64]).toBeCloseTo(1.0, 2);    // E  = 90° → code 64
+    expect(lut[128]).toBeCloseTo(0.0, 2);   // S  = 180°→ code 128
+    expect(lut[192]).toBeCloseTo(1.0, 2);   // W  = 270°→ code 192
+  });
+
+  it('all entries are in [0, 1]', () => {
+    const lut = buildAspectScoreLut(prefs);
+    for (let i = 0; i < 256; i++) {
+      expect(lut[i]).toBeGreaterThanOrEqual(0);
+      expect(lut[i]).toBeLessThanOrEqual(1);
+    }
   });
 });

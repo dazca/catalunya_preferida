@@ -11,6 +11,7 @@ import type {
 import {
   evaluateTransferFunction,
   scoreAspect,
+  scoreAspectAngle,
 } from './transferFunction';
 import { evaluateCustomFormula } from './formulaEngine';
 import type {
@@ -524,7 +525,7 @@ export function isTerrainDisqualifiedPixel(
 export function evaluateTerrainPixels(
   slopeDeg: number,
   elevationM: number,
-  aspect: string,
+  aspect: string | number,
   terrainSubLayers: LayerMeta[],
   configs: LayerConfigs,
 ): { weightedSum: number; totalWeight: number; disqualified: boolean } {
@@ -542,7 +543,12 @@ export function evaluateTerrainPixels(
         result = combineSubScores([scoreSingleTf(elevationM, configs.terrain.elevation)]);
         break;
       case 'terrainAspect':
-        result = { score: scoreAspect(aspect, configs.terrain.aspect), disqualified: false };
+        result = {
+          score: typeof aspect === 'number'
+            ? scoreAspectAngle(aspect, configs.terrain.aspect)
+            : scoreAspect(aspect, configs.terrain.aspect),
+          disqualified: false,
+        };
         break;
     }
     if (!result) continue;

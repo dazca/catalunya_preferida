@@ -637,7 +637,9 @@ export function getAspectAt(lon: number, lat: number): string | null {
     dzdy = ((sg + 2 * sh + si) - (sa + 2 * sb + sc)) / (8 * cellH);
   }
 
-  let deg = Math.atan2(dzdx, -dzdy) * (180 / Math.PI);
+  // Downhill bearing: atan2(east, north) with gradient negated
+  // In pixel coords: +px = east, +py = south, so north = -dzdy
+  let deg = Math.atan2(-dzdx, dzdy) * (180 / Math.PI);
   if (deg < 0) deg += 360;
 
   if (deg < 22.5 || deg >= 337.5) return 'N';
@@ -657,13 +659,22 @@ export function getAspectAt(lon: number, lat: number): string | null {
 /** Aspect label lookup indexed by the 3-bit encoding (0=N … 7=NW). */
 export const DEM_ASPECT_LABELS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;
 
+/**
+ * Convert a 0-255 aspect code to one of the 8 cardinal/intercardinal labels.
+ * Code 0 = N (0°), 32 = NE (45°), 64 = E (90°), … 224 = NW (315°).
+ */
+export function aspectCodeToLabel(code: number): string {
+  const idx = Math.round((code & 0xFF) / 32) % 8;
+  return DEM_ASPECT_LABELS[idx];
+}
+
 /** Per-pixel DEM data pre-sampled for a whole viewport grid. */
 export interface DemViewportSamples {
   /** Horn-kernel slope in degrees. */
   slopes: Float32Array;
   /** Elevation in metres. */
   elevations: Float32Array;
-  /** Aspect encoded as 0=N, 1=NE, … 7=NW. Use DEM_ASPECT_LABELS[x]. */
+  /** Aspect encoded as 0-255 representing 0°-360° (0=N, 64=E, 128=S, 192=W). */
   aspects: Uint8Array;
   /** 1 = valid DEM sample, 0 = outside grid / no data. */
   hasData: Uint8Array;
@@ -847,9 +858,9 @@ export function sampleDemViewport(
           const dzdy = ((g  + 2*h  + iv) - (a + 2*b + cv)) / (8 * fCellH);
           slopes[idx]     = Math.atan(Math.sqrt(dzdx*dzdx + dzdy*dzdy)) * (180 / Math.PI);
           elevations[idx] = ev;
-          let deg = Math.atan2(dzdx, -dzdy) * (180 / Math.PI);
+          let deg = Math.atan2(-dzdx, dzdy) * (180 / Math.PI);
           if (deg < 0) deg += 360;
-          aspects[idx] = Math.min(7, Math.round(deg / 45) % 8);
+          aspects[idx] = Math.round(deg * 256 / 360) & 0xFF;
           hasData[idx] = 1;
           continue;
         }
@@ -880,9 +891,9 @@ export function sampleDemViewport(
       const dzdy = ((g  + 2*h  + iv) - (a + 2*b + cv)) / (8 * ch9);
       slopes[idx]     = Math.atan(Math.sqrt(dzdx*dzdx + dzdy*dzdy)) * (180 / Math.PI);
       elevations[idx] = ev;
-      let deg = Math.atan2(dzdx, -dzdy) * (180 / Math.PI);
+      let deg = Math.atan2(-dzdx, dzdy) * (180 / Math.PI);
       if (deg < 0) deg += 360;
-      aspects[idx] = Math.min(7, Math.round(deg / 45) % 8);
+      aspects[idx] = Math.round(deg * 256 / 360) & 0xFF;
       hasData[idx] = 1;
     }
   }

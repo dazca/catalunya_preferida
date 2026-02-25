@@ -23,7 +23,7 @@ import { computeNonTerrainCached, evaluateTerrainPixels, TERRAIN_SUB_IDS, isDisq
 import type { NonTerrainCached } from './scorer';
 import { scoreToRgba } from './turboColormap';
 import { pointInPolygon } from './spatial';
-import { sampleDemViewport, isDemLoaded, DEM_ASPECT_LABELS } from './demSlope';
+import { sampleDemViewport, isDemLoaded } from './demSlope';
 import type { DemViewportSamples } from './demSlope';
 import { compileFormulaForBatch, normalizeFormulaValueKeys } from './formulaEngine';
 
@@ -344,7 +344,7 @@ export function renderHeatmapImage(
           const t  = evaluateTerrainPixels(
             demSamples.slopes[idx],
             demSamples.elevations[idx],
-            DEM_ASPECT_LABELS[demSamples.aspects[idx]],
+            demSamples.aspects[idx] * 360 / 256,
             terrainSubLayers,
             configs,
           );

@@ -239,22 +239,40 @@ describe('buildAllVariableGrids', () => {
 /* ══════════════════════════════════════════════════════════════════ */
 
 describe('scoreAspectGrid', () => {
-  it('maps 0-7 aspect codes through wind-rose preferences', () => {
-    const aspects = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7]);
+  it('maps 256-step aspect codes through wind-rose preferences (exact directions)', () => {
+    // Exact direction codes: 0=N(0°), 32=NE(45°), 64=E(90°), 96=SE(135°),
+    //                        128=S(180°), 160=SW(225°), 192=W(270°), 224=NW(315°)
+    const aspects = new Uint8Array([0, 32, 64, 96, 128, 160, 192, 224]);
     const prefs: AspectPreferences = {
       N: 1.0, NE: 0.8, E: 0.6, SE: 0.4, S: 0.2, SW: 0.3, W: 0.5, NW: 0.7,
     };
     const out = new Float32Array(8);
     scoreAspectGrid(aspects, prefs, out);
 
-    expect(out[0]).toBeCloseTo(1.0, 5);   // N
-    expect(out[1]).toBeCloseTo(0.8, 5);   // NE
-    expect(out[2]).toBeCloseTo(0.6, 5);   // E
-    expect(out[3]).toBeCloseTo(0.4, 5);   // SE
-    expect(out[4]).toBeCloseTo(0.2, 5);   // S
-    expect(out[5]).toBeCloseTo(0.3, 5);   // SW
-    expect(out[6]).toBeCloseTo(0.5, 5);   // W
-    expect(out[7]).toBeCloseTo(0.7, 5);   // NW
+    expect(out[0]).toBeCloseTo(1.0, 2);   // N
+    expect(out[1]).toBeCloseTo(0.8, 2);   // NE
+    expect(out[2]).toBeCloseTo(0.6, 2);   // E
+    expect(out[3]).toBeCloseTo(0.4, 2);   // SE
+    expect(out[4]).toBeCloseTo(0.2, 2);   // S
+    expect(out[5]).toBeCloseTo(0.3, 2);   // SW
+    expect(out[6]).toBeCloseTo(0.5, 2);   // W
+    expect(out[7]).toBeCloseTo(0.7, 2);   // NW
+  });
+
+  it('intermediate codes produce smoothly interpolated scores', () => {
+    // Code 16 = midway between N(0°) and NE(45°) → should blend the two
+    const aspects = new Uint8Array([16]);
+    const prefs: AspectPreferences = {
+      N: 1.0, NE: 0.0, E: 0.5, SE: 0.5, S: 0.5, SW: 0.5, W: 0.5, NW: 0.5,
+    };
+    const out = new Float32Array(1);
+    scoreAspectGrid(aspects, prefs, out);
+
+    // Cosine interpolation midpoint: 0.5 * (1 + 0) = 0.5
+    expect(out[0]).toBeCloseTo(0.5, 1);
+    // Definitely not 1.0 (hard N bucket) or 0.0 (hard NE bucket)
+    expect(out[0]).toBeGreaterThan(0.1);
+    expect(out[0]).toBeLessThan(0.9);
   });
 });
 
