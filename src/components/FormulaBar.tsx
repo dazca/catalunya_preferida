@@ -825,6 +825,16 @@ export default function FormulaBar() {
   );
 
   /**
+   * True when a custom raw formula is active in Visual mode and differs from
+   * what the chips would produce.  The heatmap is using the raw formula, not
+   * the visual pipeline — we show a notice so the user knows.
+   */
+  const hasCustomOverride = useMemo(
+    () => formulaMode === 'visual' && !!customFormula && customFormula.trim() !== visualRawFormula.trim(),
+    [formulaMode, customFormula, visualRawFormula],
+  );
+
+  /**
    * The formula shown in the raw textarea.  When in Visual mode the store's
    * customFormula is empty — but we seed the textarea from visualRawFormula
    * when opening or switching to Raw.
@@ -1028,8 +1038,8 @@ export default function FormulaBar() {
                   <button
                     className={`fb-formula-mode-btn ${formulaMode === 'visual' ? 'active' : ''}`}
                     onClick={() => {
-                      // Always switch back to Visual — it reads layers+configs directly
-                      setCustomFormula('');
+                      // Switch to Visual — keep customFormula so it stays active;
+                      // user can clear it explicitly via the override badge.
                       setFormulaMode('visual');
                     }}
                   >
@@ -1084,7 +1094,22 @@ export default function FormulaBar() {
 
           <span className="fb-label">Score =</span>
 
-          {formulaMode === 'visual' && requiredIndicators.length > 0 && (
+          {hasCustomOverride && (
+            <span className="fb-custom-override">
+              <span className="fb-custom-override-formula" title={customFormula}>
+                {customFormula.length > 56 ? customFormula.slice(0, 53) + '…' : customFormula}
+              </span>
+              <button
+                className="fb-custom-override-clear"
+                title="Revert to visual formula"
+                onClick={() => setCustomFormula('')}
+              >
+                ×
+              </button>
+            </span>
+          )}
+
+          {formulaMode === 'visual' && !hasCustomOverride && requiredIndicators.length > 0 && (
             <>
               {requiredIndicators.map((req) => (
                 <span key={req.id} className="fb-required-badge" title={req.thresholdText}>
@@ -1096,24 +1121,31 @@ export default function FormulaBar() {
             </>
           )}
 
-          {formulaMode === 'visual' && enabledLayers.map((layer, idx) => (
-            <span key={layer.id} style={{ display: 'contents' }}>
-              {idx > 0 && <span className="fb-op">+</span>}
-              <FormulaChip
-                layer={layer}
-                isPopoverTarget={activeId === layer.id}
-                onHover={(rect) => handleChipHover(layer.id, rect)}
-                onLeave={handleChipLeave}
-                onClick={(rect) => handleChipClick(layer.id, rect)}
-                chipRef={(el) => {
-                  if (el) chipRefs.current.set(layer.id, el);
-                  else chipRefs.current.delete(layer.id);
-                }}
-              />
+          {formulaMode === 'visual' && (
+            <span style={{
+              display: 'flex', alignItems: 'center', gap: '6px',
+              ...(hasCustomOverride ? { opacity: 0.35, pointerEvents: 'none' } : {}),
+            }}>
+              {enabledLayers.map((layer, idx) => (
+                <span key={layer.id} style={{ display: 'contents' }}>
+                  {idx > 0 && <span className="fb-op">+</span>}
+                  <FormulaChip
+                    layer={layer}
+                    isPopoverTarget={activeId === layer.id}
+                    onHover={(rect) => handleChipHover(layer.id, rect)}
+                    onLeave={handleChipLeave}
+                    onClick={(rect) => handleChipClick(layer.id, rect)}
+                    chipRef={(el) => {
+                      if (el) chipRefs.current.set(layer.id, el);
+                      else chipRefs.current.delete(layer.id);
+                    }}
+                  />
+                </span>
+              ))}
             </span>
-          ))}
+          )}
 
-          {formulaMode === 'visual' && (requiredIndicators.length > 0 || totalWeight !== 1) && (
+          {formulaMode === 'visual' && !hasCustomOverride && (requiredIndicators.length > 0 || totalWeight !== 1) && (
             <>
               {requiredIndicators.length > 0 && <span className="fb-paren">)</span>}
               {totalWeight !== 1 && (

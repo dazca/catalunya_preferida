@@ -399,6 +399,44 @@
   cursor: help;
 }
 
+/* Custom formula override notice (Visual mode with a raw formula active) */
+.fb-custom-override {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 480px;
+  padding: 2px 6px 2px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.07);
+  flex-shrink: 1;
+  min-width: 0;
+}
+.fb-custom-override-formula {
+  font-size: 10px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  color: #fbbf24aa;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+.fb-custom-override-clear {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: #fbbf2488;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  transition: color 0.12s;
+}
+.fb-custom-override-clear:hover {
+  color: #fbbf24cc;
+}
+
 /* ── Submenu groups in [+] dropdown ──────────────────────────────── */
 .fb-add-group {
   position: relative;
