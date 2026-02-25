@@ -241,6 +241,16 @@
   padding: 0 1px;
 }
 
+/* Grouping parentheses and /N divisor in visual formula */
+.fb-paren {
+  font-size: 13px;
+  color: #4a5270;
+  flex-shrink: 0;
+  padding: 0 1px;
+  opacity: 0.75;
+  user-select: none;
+}
+
 /* ================================================================== */
 /*  FormulaChip – icon + weight badge                                  */
 /* ================================================================== */

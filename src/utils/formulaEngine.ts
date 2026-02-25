@@ -249,12 +249,63 @@ function invrangeFn(v: number, M: number, N: number, high = 1, low = 0): number 
   return low + (high - low) * t;
 }
 
+type MathBuiltins = {
+  SQRT: (v: number) => number;
+  ABS:  (v: number) => number;
+  POW:  (base: number, exp: number) => number;
+  MIN:  (...args: number[]) => number;
+  MAX:  (...args: number[]) => number;
+  LOG:  (v: number) => number;
+  LOG2: (v: number) => number;
+  LOG10:(v: number) => number;
+  EXP:  (v: number) => number;
+  SIGN: (v: number) => number;
+  CLAMP:(v: number, lo: number, hi: number) => number;
+  IF:   (cond: unknown, t: number, f: number) => number;
+  FLOOR:(v: number) => number;
+  CEIL: (v: number) => number;
+  ROUND:(v: number) => number;
+  ATAN2:(y: number, x: number) => number;
+  ACOS: (v: number) => number;
+  ASIN: (v: number) => number;
+  ATAN: (v: number) => number;
+  COS:  (v: number) => number;
+  TAN:  (v: number) => number;
+  PI:   number;
+};
+
+const BUILTIN_MATH: MathBuiltins = {
+  SQRT: Math.sqrt,
+  ABS:  Math.abs,
+  POW:  Math.pow,
+  MIN:  Math.min,
+  MAX:  Math.max,
+  LOG:  Math.log,
+  LOG2: Math.log2,
+  LOG10:Math.log10,
+  EXP:  Math.exp,
+  SIGN: (v) => v > 0 ? 1 : v < 0 ? -1 : 0,
+  CLAMP:(v, lo, hi) => v < lo ? lo : v > hi ? hi : v,
+  IF:   (cond, t, f) => cond ? t : f,
+  FLOOR:Math.floor,
+  CEIL: Math.ceil,
+  ROUND:Math.round,
+  ATAN2:Math.atan2,
+  ACOS: Math.acos,
+  ASIN: Math.asin,
+  ATAN: Math.atan,
+  COS:  Math.cos,
+  TAN:  Math.tan,
+  PI:   Math.PI,
+};
+
 type CompiledFormulaFn = (
   VAR: (name: string) => number,
   SIN: TfFn,
   INVSIN: TfFn,
   RANGE: TfFn,
   INVRANGE: TfFn,
+  _M: MathBuiltins,
 ) => unknown;
 
 const COMPILED_CACHE = new Map<string, CompiledFormulaFn>();
@@ -318,7 +369,15 @@ function normalizeFormulaSource(formula: string): string {
   );
 
   // Wrap bare identifiers with VAR("name") — skip reserved function names
-  const reserved = new Set(['SIN', 'INVSIN', 'RANGE', 'INVRANGE', 'VAR', 'Math', 'true', 'false', 'null', 'undefined']);
+  const reserved = new Set([
+    'SIN', 'INVSIN', 'RANGE', 'INVRANGE', 'VAR', 'Math',
+    'true', 'false', 'null', 'undefined',
+    // Math builtins injected via _M destructuring
+    'SQRT', 'ABS', 'POW', 'MIN', 'MAX', 'LOG', 'LOG2', 'LOG10',
+    'EXP', 'SIGN', 'CLAMP', 'IF', 'FLOOR', 'CEIL', 'ROUND',
+    'ATAN2', 'ACOS', 'ASIN', 'ATAN', 'COS', 'TAN', 'PI',
+    '_M',
+  ]);
   source = source.replace(/\b([A-Za-z_][A-Za-z0-9_]*)\b(?!\s*\()/g, (match, name: string) => {
     if (reserved.has(name)) return match;
     return `VAR("${name}")`;
@@ -332,7 +391,11 @@ function getCompiledFormula(normalizedInput: string): CompiledFormulaFn {
   const cached = COMPILED_CACHE.get(key);
   if (cached) return cached;
   const normalizedSource = normalizeFormulaSource(normalizedInput);
-  const compiled = new Function('VAR', 'SIN', 'INVSIN', 'RANGE', 'INVRANGE', `return (${normalizedSource});`) as CompiledFormulaFn;
+  const mathDestructure = `const {${Object.keys(BUILTIN_MATH).join(',')}} = _M;`;
+  const compiled = new Function(
+    'VAR', 'SIN', 'INVSIN', 'RANGE', 'INVRANGE', '_M',
+    `${mathDestructure}\nreturn (${normalizedSource});`,
+  ) as CompiledFormulaFn;
   COMPILED_CACHE.set(key, compiled);
   return compiled;
 }
@@ -354,7 +417,7 @@ export function validateCustomFormula(formula: string): FormulaValidationResult 
   try {
     const noop: TfFn = () => 0;
     const fn = getCompiledFormula(normalizedInput);
-    fn(() => 0, noop, noop, noop, noop);
+    fn(() => 0, noop, noop, noop, noop, BUILTIN_MATH);
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : 'Invalid formula' };
@@ -399,12 +462,12 @@ export function compileFormulaForBatch(
   try {
     const noop: TfFn = () => 0;
     const fn = getCompiledFormula(normalizedInput);
-    fn(() => 0, noop, noop, noop, noop); // validation dry-run
+    fn(() => 0, noop, noop, noop, noop, BUILTIN_MATH); // validation dry-run
     return (values: Record<string, number>): number => {
       try {
         const VAR = (name: string): number => values[normalizeName(name)] ?? 0;
         const { SIN, INVSIN, RANGE, INVRANGE } = buildRuntimeFns(values);
-        const output = fn(VAR, SIN, INVSIN, RANGE, INVRANGE);
+        const output = fn(VAR, SIN, INVSIN, RANGE, INVRANGE, BUILTIN_MATH);
         const numeric = typeof output === 'boolean' ? (output ? 1 : 0) : Number(output);
         return clamp01(numeric);
       } catch { return 0; }
@@ -427,7 +490,7 @@ export function evaluateCustomFormula(formula: string, rawValues: FormulaValueMa
 
   try {
     const fn = getCompiledFormula(normalizedInput);
-    const output = fn(VAR, SIN, INVSIN, RANGE, INVRANGE);
+    const output = fn(VAR, SIN, INVSIN, RANGE, INVRANGE, BUILTIN_MATH);
     const numeric = typeof output === 'boolean' ? (output ? 1 : 0) : Number(output);
     return clamp01(numeric);
   } catch {

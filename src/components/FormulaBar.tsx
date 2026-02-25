@@ -818,6 +818,12 @@ export default function FormulaBar() {
     [enabledLayers, configs],
   );
 
+  /** Sum of all enabled layer weights — used for the visual `/N` display. */
+  const totalWeight = useMemo(
+    () => enabledLayers.reduce((s, l) => s + l.weight, 0),
+    [enabledLayers],
+  );
+
   /**
    * The formula shown in the raw textarea.  When in Visual mode the store's
    * customFormula is empty — but we seed the textarea from visualRawFormula
@@ -1067,7 +1073,7 @@ export default function FormulaBar() {
                         Revert
                       </button>
                     </div>
-                    <div className="fb-formula-help">Fns: SIN INVSIN RANGE INVRANGE(var, M, N [, high, low]) | Ops: + - * / and ()</div>
+                    <div className="fb-formula-help">Fns: SIN INVSIN RANGE INVRANGE(var, M, N [, high, low]) | Math: SQRT ABS POW(b,e) MIN MAX LOG EXP SIGN CLAMP(v,lo,hi) IF(cond,t,f) FLOOR CEIL ROUND | Ops: + - * / &lt; &gt; and ()</div>
                   </>
                 ) : (
                   <div className="fb-formula-help">Visual mode uses chips, weights and popovers.</div>
@@ -1086,6 +1092,7 @@ export default function FormulaBar() {
                 </span>
               ))}
               <span className="fb-op">×</span>
+              <span className="fb-paren">(</span>
             </>
           )}
 
@@ -1105,6 +1112,20 @@ export default function FormulaBar() {
               />
             </span>
           ))}
+
+          {formulaMode === 'visual' && (requiredIndicators.length > 0 || totalWeight !== 1) && (
+            <>
+              {requiredIndicators.length > 0 && <span className="fb-paren">)</span>}
+              {totalWeight !== 1 && (
+                <>
+                  <span className="fb-op">/</span>
+                  <span className="fb-paren">
+                    {Number.isInteger(totalWeight) ? totalWeight : parseFloat(totalWeight.toFixed(2))}
+                  </span>
+                </>
+              )}
+            </>
+          )}
 
           {formulaMode === 'visual' ? (
             <AddLayerButton enabledLayers={enabledLayers} allLayers={layers} onAdd={handleAddLayer} />
