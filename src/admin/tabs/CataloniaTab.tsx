@@ -19,9 +19,9 @@ import { CompassSVG, AssertionsBox } from '../components/Shared';
 import type { OctantStat, Assertion } from '../geoCore';
 
 const PRESETS = {
-  pyrenees: { latMin: 42.4, latMax: 42.9, lonMin: 0.7, lonMax: 1.4, label: 'Catalan Pyrenees' },
-  montserrat: { latMin: 41.57, latMax: 41.63, lonMin: 1.8, lonMax: 1.87, label: 'Montserrat' },
-  delta: { latMin: 40.68, latMax: 40.8, lonMin: 0.65, lonMax: 0.9, label: 'Ebro Delta' },
+  pyrenees: { latMin: 42.55, latMax: 42.75, lonMin: 0.9, lonMax: 1.2, label: 'Catalan Pyrenees' },
+  montserrat: { latMin: 41.58, latMax: 41.63, lonMin: 1.81, lonMax: 1.86, label: 'Montserrat' },
+  delta: { latMin: 40.70, latMax: 40.78, lonMin: 0.70, lonMax: 0.85, label: 'Ebro Delta' },
 } as const;
 type PresetKey = keyof typeof PRESETS;
 
@@ -31,7 +31,7 @@ export default function CataloniaTab() {
   const [latMax, setLatMax] = useState<number>(PRESETS.pyrenees.latMax);
   const [lonMin, setLonMin] = useState<number>(PRESETS.pyrenees.lonMin);
   const [lonMax, setLonMax] = useState<number>(PRESETS.pyrenees.lonMax);
-  const [resolution, setResolution] = useState(50);
+  const [resolution, setResolution] = useState(24);
   const [prefAz, setPrefAz] = useState(180);
   const [prefStr, setPrefStr] = useState(100);
   const [slopeW, setSlopeW] = useState(0);
