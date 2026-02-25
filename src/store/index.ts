@@ -10,6 +10,8 @@ import type { LayerId, LayerMeta } from '../types';
 import type { LayerConfigs, VoteTerm } from '../types/transferFunction';
 import { DEFAULT_LAYER_CONFIGS, defaultTf } from '../types/transferFunction';
 import { DEFAULT_CUSTOM_FORMULA, normalizeUserFormulaInput } from '../utils/formulaEngine';
+import { DEFAULT_INTEGRITY_RULES, runDataIntegrityChecks } from '../utils/dataIntegrity';
+import type { DataIntegrityInput, IntegrityReport, IntegrityRules } from '../utils/dataIntegrity';
 import type { Lang } from '../i18n';
 
 /** Snapshot of undoable state. */
@@ -61,6 +63,25 @@ export const DEFAULT_VIEW: ViewSettings = {
   heatmapOpacity: 0.75,
   maskDisqualifiedAsBlack: true,
 };
+
+export interface DataIntegritySuggestion {
+  id: string;
+  label: string;
+  probability: number;
+}
+
+export const INTEGRITY_SUGGESTIONS: DataIntegritySuggestion[] = [
+  { id: 'completeness', label: 'Layer completeness checks', probability: 0.99 },
+  { id: 'coverage', label: 'Municipality coverage checks', probability: 0.98 },
+  { id: 'duplicates', label: 'Duplicate detection', probability: 0.95 },
+  { id: 'ranges', label: 'Range plausibility checks', probability: 0.95 },
+  { id: 'outliers', label: 'Distribution anomaly checks', probability: 0.9 },
+  { id: 'crossfield', label: 'Cross-field consistency checks', probability: 0.88 },
+  { id: 'freshness', label: 'Data freshness checks', probability: 0.82 },
+  { id: 'left-parties', label: 'Left-party taxonomy editor', probability: 0.8 },
+  { id: 'rule-tuning', label: 'Rule tuning controls', probability: 0.96 },
+  { id: 'report-export', label: 'Report export/import', probability: 0.92 },
+];
 
 /** All available layers with their default metadata (each sub-metric is its own layer). */
 export const DEFAULT_LAYERS: LayerMeta[] = [
@@ -114,6 +135,14 @@ interface AppState {
   customFormula: string;
   /** Formula editor mode: visual chips or raw expression. */
   formulaMode: 'visual' | 'raw';
+  /** Data integrity admin panel visibility. */
+  dataIntegrityPanelOpen: boolean;
+  /** Persisted integrity rules. */
+  integrityRules: IntegrityRules;
+  /** Last generated integrity report. */
+  integrityReport: IntegrityReport | null;
+  /** Informational signature of last checked payload. */
+  integrityLastSignature: string | null;
 
   /** Undo history stacks (not persisted). */
   _past: HistoryEntry[];
@@ -127,6 +156,14 @@ interface AppState {
   setCustomFormula: (formula: string) => void;
   resetCustomFormula: () => void;
   setFormulaMode: (mode: 'visual' | 'raw') => void;
+  setDataIntegrityPanelOpen: (open: boolean) => void;
+  updateIntegrityRules: (patch: Partial<IntegrityRules>) => void;
+  replaceIntegrityRules: (rules: IntegrityRules) => void;
+  resetIntegrityRules: () => void;
+  runIntegrityChecks: (input: DataIntegrityInput) => IntegrityReport;
+  clearIntegrityReport: () => void;
+  importIntegrityProfile: (json: string) => { ok: boolean; error?: string };
+  exportIntegrityProfile: () => string;
   selectMunicipality: (codi: string | null) => void;
   toggleSidebar: () => void;
   setAnalysisPoint: (point: { lat: number; lon: number } | null) => void;
@@ -159,6 +196,10 @@ export const useAppStore = create<AppState>()(
       lang: 'ca' as Lang,
       customFormula: DEFAULT_CUSTOM_FORMULA,
       formulaMode: 'visual',
+      dataIntegrityPanelOpen: false,
+      integrityRules: DEFAULT_INTEGRITY_RULES,
+      integrityReport: null,
+      integrityLastSignature: null,
       _past: [],
       _future: [],
 
@@ -237,6 +278,49 @@ export const useAppStore = create<AppState>()(
       setCustomFormula: (customFormula) => set({ customFormula: normalizeUserFormulaInput(customFormula) }),
       resetCustomFormula: () => set({ customFormula: DEFAULT_CUSTOM_FORMULA }),
       setFormulaMode: (formulaMode) => set({ formulaMode }),
+      setDataIntegrityPanelOpen: (open) => set({ dataIntegrityPanelOpen: open }),
+
+      updateIntegrityRules: (patch) =>
+        set((state) => ({ integrityRules: { ...state.integrityRules, ...patch } })),
+
+      replaceIntegrityRules: (rules) => set({ integrityRules: rules }),
+
+      resetIntegrityRules: () => set({ integrityRules: DEFAULT_INTEGRITY_RULES }),
+
+      runIntegrityChecks: (input) => {
+        const report = runDataIntegrityChecks(input, get().integrityRules);
+        const municipalitiesCount = input.municipalities?.features.length ?? 0;
+        const signature = `${municipalitiesCount}:${Object.keys(input.municipalityData.votes).length}:${Object.keys(input.municipalityData.terrain).length}`;
+        set({ integrityReport: report, integrityLastSignature: signature });
+        return report;
+      },
+
+      clearIntegrityReport: () => set({ integrityReport: null, integrityLastSignature: null }),
+
+      importIntegrityProfile: (json) => {
+        try {
+          const parsed = JSON.parse(json) as Partial<IntegrityRules>;
+          const merged: IntegrityRules = {
+            ...DEFAULT_INTEGRITY_RULES,
+            ...parsed,
+            leftParties: Array.isArray(parsed.leftParties)
+              ? parsed.leftParties.map(String)
+              : DEFAULT_INTEGRITY_RULES.leftParties,
+            independenceParties: Array.isArray(parsed.independenceParties)
+              ? parsed.independenceParties.map(String)
+              : DEFAULT_INTEGRITY_RULES.independenceParties,
+          };
+          set({ integrityRules: merged });
+          return { ok: true };
+        } catch (error) {
+          return {
+            ok: false,
+            error: error instanceof Error ? error.message : 'Invalid profile JSON',
+          };
+        }
+      },
+
+      exportIntegrityProfile: () => JSON.stringify(get().integrityRules, null, 2),
 
       selectMunicipality: (codi) => set({ selectedMunicipality: codi }),
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
@@ -278,7 +362,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'better-idealista-config',
-      version: 6,
+      version: 7,
       // Persist everything except transient UI state
       partialize: (state) => ({
         layers: state.layers,
@@ -286,6 +370,8 @@ export const useAppStore = create<AppState>()(
         view: state.view,
         customFormula: state.customFormula,
         formulaMode: state.formulaMode,
+        integrityRules: state.integrityRules,
+        dataIntegrityPanelOpen: state.dataIntegrityPanelOpen,
         presets: state.presets,
         sidebarOpen: state.sidebarOpen,
         lang: state.lang,
@@ -448,6 +534,16 @@ export const useAppStore = create<AppState>()(
           if (typeof state.customFormula === 'string' && state.customFormula.includes('RANGE(') && !state.customFormula.includes('SIN(')) {
             state.customFormula = '';
             state.formulaMode = 'visual';
+          }
+        }
+
+        // ── v6 → v7: add integrity defaults ─────────────────────
+        if (version < 7) {
+          if (!state.integrityRules || typeof state.integrityRules !== 'object') {
+            state.integrityRules = DEFAULT_INTEGRITY_RULES;
+          }
+          if (typeof state.dataIntegrityPanelOpen !== 'boolean') {
+            state.dataIntegrityPanelOpen = false;
           }
         }
 
