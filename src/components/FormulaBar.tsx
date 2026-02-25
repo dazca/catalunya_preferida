@@ -22,22 +22,16 @@ import type {
   LayerConfigs,
   LayerTransferConfig,
   TransferFunction,
+  TfShape,
   VoteMetric,
 } from '../types/transferFunction';
 import { validateCustomFormula, visualToRawFormula, LAYER_VAR, layerTf } from '../utils/formulaEngine';
 import { normalizeUserFormulaInput } from '../utils/formulaEngine';
+import { parseFormula, serializeAst, walkAst, type AstNode, type CallNode } from '../utils/formulaParser';
+import { detectSimpleStructure, type SimpleStructure, type SimpleTerm } from '../utils/formulaParser';
 import CurveEditor from './CurveEditor';
 import WindRoseEditor from './WindRoseEditor';
 import './FormulaBar.css';
-
-type RequiredIndicator = {
-  id: LayerId;
-  icon: string;
-  label: string;
-  thresholdText: string;
-  varName: string;
-  decayEnd: number;
-};
 
 /** Mapping from vote sub-layer IDs to their VoteMetric key. */
 const VOTE_ID_TO_METRIC: Record<string, VoteMetric> = {
@@ -48,110 +42,93 @@ const VOTE_ID_TO_METRIC: Record<string, VoteMetric> = {
   votesTurnout: 'turnoutPct',
 };
 
-/* ─── helpers: layer → primary TF accessor ─────────────────────────── */
+const TF_FN_NAMES = new Set(['SIN', 'INVSIN', 'RANGE', 'INVRANGE']);
 
-/** Return the "primary" transfer-function for a layer (for scroll shortcuts). */
-function primaryTf(id: LayerId, configs: LayerConfigs): TransferFunction | null {
-  switch (id) {
-    case 'terrainSlope': return configs.terrain.slope.tf;
-    case 'terrainElevation': return configs.terrain.elevation.tf;
-    case 'terrainAspect': return null; // aspect uses wind-rose
-    case 'votesLeft':
-    case 'votesRight':
-    case 'votesIndep':
-    case 'votesUnionist':
-    case 'votesTurnout': {
-      const metric = VOTE_ID_TO_METRIC[id];
-      return configs.votes.terms.find((t) => t.metric === metric)?.value.tf ?? null;
-    }
-    case 'transit': return configs.transit.tf;
-    case 'forest': return configs.forest.tf;
-    case 'airQualityPm10': return configs.airQuality.pm10.tf;
-    case 'airQualityNo2': return configs.airQuality.no2.tf;
-    case 'crime': return configs.crime.tf;
-    case 'healthcare': return configs.healthcare.tf;
-    case 'schools': return configs.schools.tf;
-    case 'internet': return configs.internet.tf;
-    case 'climateTemp': return configs.climate.temperature.tf;
-    case 'climateRainfall': return configs.climate.rainfall.tf;
-    case 'rentalPrices': return configs.rentalPrices.tf;
-    case 'employment': return configs.employment.tf;
-    case 'amenities': return configs.amenities.tf;
-    default: return null;
+function fmtN(v: number): string {
+  return Number.isInteger(v) ? String(v) : parseFloat(v.toFixed(2)).toString();
+}
+
+function tfFnName(tf: TransferFunction): 'SIN' | 'INVSIN' | 'RANGE' | 'INVRANGE' {
+  switch (tf.shape ?? 'sin') {
+    case 'invsin': return 'INVSIN';
+    case 'range': return 'RANGE';
+    case 'invrange': return 'INVRANGE';
+    default: return 'SIN';
   }
 }
 
-/** Apply a patch to the primary TF of a layer. */
-function patchPrimaryTf(
-  id: LayerId,
-  configs: LayerConfigs,
-  patch: Partial<TransferFunction>,
-  updateConfig: <K extends keyof LayerConfigs>(layer: K, values: LayerConfigs[K]) => void,
-) {
-  const apply = (tf: TransferFunction): TransferFunction => ({ ...tf, ...patch });
-  switch (id) {
-    case 'terrainSlope':
-      return updateConfig('terrain', {
-        ...configs.terrain,
-        slope: { ...configs.terrain.slope, tf: apply(configs.terrain.slope.tf) },
-      });
-    case 'terrainElevation':
-      return updateConfig('terrain', {
-        ...configs.terrain,
-        elevation: { ...configs.terrain.elevation, tf: apply(configs.terrain.elevation.tf) },
-      });
-    case 'terrainAspect':
-      return; // no single TF
-    case 'votesLeft':
-    case 'votesRight':
-    case 'votesIndep':
-    case 'votesUnionist':
-    case 'votesTurnout': {
-      const metric = VOTE_ID_TO_METRIC[id];
-      const terms = configs.votes.terms.map((t) =>
-        t.metric === metric ? { ...t, value: { ...t.value, tf: apply(t.value.tf) } } : t,
-      );
-      return updateConfig('votes', { terms });
-    }
-    case 'transit':
-      return updateConfig('transit', { ...configs.transit, tf: apply(configs.transit.tf) });
-    case 'forest':
-      return updateConfig('forest', { ...configs.forest, tf: apply(configs.forest.tf) });
-    case 'airQualityPm10':
-      return updateConfig('airQuality', {
-        ...configs.airQuality,
-        pm10: { ...configs.airQuality.pm10, tf: apply(configs.airQuality.pm10.tf) },
-      });
-    case 'airQualityNo2':
-      return updateConfig('airQuality', {
-        ...configs.airQuality,
-        no2: { ...configs.airQuality.no2, tf: apply(configs.airQuality.no2.tf) },
-      });
-    case 'crime':
-      return updateConfig('crime', { ...configs.crime, tf: apply(configs.crime.tf) });
-    case 'healthcare':
-      return updateConfig('healthcare', { ...configs.healthcare, tf: apply(configs.healthcare.tf) });
-    case 'schools':
-      return updateConfig('schools', { ...configs.schools, tf: apply(configs.schools.tf) });
-    case 'internet':
-      return updateConfig('internet', { ...configs.internet, tf: apply(configs.internet.tf) });
-    case 'climateTemp':
-      return updateConfig('climate', {
-        ...configs.climate,
-        temperature: { ...configs.climate.temperature, tf: apply(configs.climate.temperature.tf) },
-      });
-    case 'climateRainfall':
-      return updateConfig('climate', {
-        ...configs.climate,
-        rainfall: { ...configs.climate.rainfall, tf: apply(configs.climate.rainfall.tf) },
-      });
-    case 'rentalPrices':
-      return updateConfig('rentalPrices', { ...configs.rentalPrices, tf: apply(configs.rentalPrices.tf) });
-    case 'employment':
-      return updateConfig('employment', { ...configs.employment, tf: apply(configs.employment.tf) });
-    case 'amenities':
-      return updateConfig('amenities', { ...configs.amenities, tf: apply(configs.amenities.tf) });
+function buildLayerFormulaTerm(id: LayerId, configs: LayerConfigs): string | null {
+  const tf = layerTf(id, configs);
+  const varName = LAYER_VAR[id];
+  if (!tf || !varName) return null;
+  const fn = tfFnName(tf);
+  const args = [varName, fmtN(tf.plateauEnd), fmtN(tf.decayEnd)];
+  if (tf.floor !== 0) args.push('1', fmtN(tf.floor));
+  return `1 * ${fn}(${args.join(', ')})`;
+}
+
+function opPrec(op: string): number {
+  if (['<', '>', '<=', '>=', '==', '!='].includes(op)) return 1;
+  if (op === '+' || op === '-') return 2;
+  if (op === '*' || op === '/') return 3;
+  if (op === '^') return 4;
+  return 0;
+}
+
+function needsParen(child: AstNode, parentOp: string, side: 'left' | 'right'): boolean {
+  if (child.kind !== 'binop') return false;
+  const cp = opPrec(child.op);
+  const pp = opPrec(parentOp);
+  if (cp < pp) return true;
+  if (cp === pp && side === 'right' && (parentOp === '-' || parentOp === '/')) return true;
+  return false;
+}
+
+function tfCallFromNode(node: AstNode): { call: CallNode; varName: string } | null {
+  if (node.kind !== 'call') return null;
+  if (!TF_FN_NAMES.has(node.name)) return null;
+  const first = node.args[0];
+  if (!first || first.kind !== 'identifier') return null;
+  return { call: node, varName: first.name };
+}
+
+function weightedTfTerm(node: AstNode): { weight: number; call: CallNode; varName: string; weightNode: AstNode | null } | null {
+  if (node.kind !== 'binop' || node.op !== '*') return null;
+  const L = node.left;
+  const R = node.right;
+  if (L.kind === 'number') {
+    const tf = tfCallFromNode(R);
+    if (tf) return { weight: L.value, call: tf.call, varName: tf.varName, weightNode: L };
   }
+  if (R.kind === 'number') {
+    const tf = tfCallFromNode(L);
+    if (tf) return { weight: R.value, call: tf.call, varName: tf.varName, weightNode: R };
+  }
+  if (L.kind === 'call' && L.name === 'WEIGHT' && L.args[0]?.kind === 'number') {
+    const tf = tfCallFromNode(R);
+    if (tf) return { weight: L.args[0].value, call: tf.call, varName: tf.varName, weightNode: L.args[0] };
+  }
+  if (R.kind === 'call' && R.name === 'WEIGHT' && R.args[0]?.kind === 'number') {
+    const tf = tfCallFromNode(L);
+    if (tf) return { weight: R.args[0].value, call: tf.call, varName: tf.varName, weightNode: R.args[0] };
+  }
+  return null;
+}
+
+/** Detect comparison with a known layer variable: `var < N` or `N > var` etc. */
+const CMP_OPS = new Set(['<', '>', '<=', '>=', '==', '!=']);
+function comparisonFromNode(node: AstNode): { varName: string; op: string; value: number; valueNode: AstNode } | null {
+  if (node.kind !== 'binop' || !CMP_OPS.has(node.op)) return null;
+  // var OP number
+  if (node.left.kind === 'identifier' && node.right.kind === 'number') {
+    return { varName: node.left.name, op: node.op, value: node.right.value, valueNode: node.right };
+  }
+  // number OP var  →  flip
+  if (node.right.kind === 'identifier' && node.left.kind === 'number') {
+    const flipOp: Record<string, string> = { '<': '>', '>': '<', '<=': '>=', '>=': '<=', '==': '==', '!=': '!=' };
+    return { varName: node.right.name, op: flipOp[node.op] ?? node.op, value: node.left.value, valueNode: node.left };
+  }
+  return null;
 }
 
 /* ─── Vote term labels ──────────────────────────────────────────────── */
@@ -167,6 +144,13 @@ const METRIC_LABELS: Record<VoteMetric, string> = {
    TfControls – single transfer-function editor inside popover.
    ═══════════════════════════════════════════════════════════════════════ */
 
+const SHAPE_OPTIONS: { value: TfShape; label: string; tip: string }[] = [
+  { value: 'sin',      label: 'SIN',      tip: 'Sinusoidal decay: 1 → floor' },
+  { value: 'invsin',   label: 'INVSIN',   tip: 'Sinusoidal rise: floor → 1' },
+  { value: 'range',    label: 'RANGE',    tip: 'Linear decay: 1 → floor' },
+  { value: 'invrange', label: 'INVRANGE', tip: 'Linear rise: floor → 1' },
+];
+
 function TfControls({
   label,
   ltc,
@@ -181,10 +165,13 @@ function TfControls({
   unit: string;
 }) {
   const t = useT();
+  const tf = ltc.tf;
   const updateTf = (newTf: TransferFunction) => onChange({ ...ltc, tf: newTf });
+  const shape = tf.shape ?? 'sin';
 
   return (
     <div className="fb-tf-controls">
+      {/* Header: label + enabled */}
       <div className="fb-tf-header">
         <span className="fb-tf-label">{label}</span>
         <label className="fb-tf-enabled">
@@ -196,51 +183,70 @@ function TfControls({
           {t('tf.on')}
         </label>
       </div>
-      <div className="fb-tf-row">
-        <label className="fb-tf-inline">
-          M
-          <input type="number" min="0.1" max="3" step="0.1"
-            value={ltc.tf.multiplier}
-            onChange={(e) => updateTf({ ...ltc.tf, multiplier: +e.target.value })}
-          />
+
+      {/* Row 1: Shape toggle + flags */}
+      <div className="fb-tf-row fb-tf-row-shape">
+        <div className="fb-tf-shape-group">
+          {SHAPE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              className={`fb-tf-shape-btn${shape === opt.value ? ' active' : ''}`}
+              title={opt.tip}
+              onClick={() => updateTf({ ...tf, shape: opt.value })}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <div className="fb-tf-flags">
+          <label className="fb-tf-flag" title="Required — disqualifies municipalities outside range">
+            <input type="checkbox" checked={tf.mandatory}
+              onChange={(e) => updateTf({ ...tf, mandatory: e.target.checked, ...(e.target.checked ? { important: false } : {}) })} />
+            <span className="fb-tf-flag-label">{t('tf.req')}</span>
+          </label>
+          <label className="fb-tf-flag" title="Important — multiplicative soft gate outside the sum">
+            <input type="checkbox" checked={tf.important}
+              onChange={(e) => updateTf({ ...tf, important: e.target.checked, ...(e.target.checked ? { mandatory: false } : {}) })} />
+            <span className="fb-tf-flag-label">Imp</span>
+          </label>
+        </div>
+      </div>
+
+      {/* Row 2: Range parameters */}
+      <div className="fb-tf-row fb-tf-row-params">
+        <label className="fb-tf-param" title="Start of transition zone">
+          <span className="fb-tf-param-label">From</span>
+          <input type="number" step="0.1" value={tf.plateauEnd}
+            onChange={(e) => updateTf({ ...tf, plateauEnd: +e.target.value })} />
+          <span className="fb-tf-unit">{unit}</span>
         </label>
-        <label className="fb-tf-inline fb-tf-wide">
-          sin(
-          <input type="number" step="0.1" value={ltc.tf.plateauEnd}
-            onChange={(e) => updateTf({ ...ltc.tf, plateauEnd: +e.target.value })}
-          />
-          →
-          <input type="number" step="0.1" value={ltc.tf.decayEnd}
-            onChange={(e) => updateTf({ ...ltc.tf, decayEnd: +e.target.value })}
-          />
-          )
-        </label>
-        <label className="fb-tf-inline">
-          floor
-          <input type="number" min="0" max="1" step="0.01" value={ltc.tf.floor}
-            onChange={(e) => updateTf({ ...ltc.tf, floor: +e.target.value })}
-          />
-        </label>
-        <label className="fb-tf-flag">
-          <input type="checkbox" checked={ltc.tf.mandatory}
-            onChange={(e) => updateTf({ ...ltc.tf, mandatory: e.target.checked })} />
-          {t('tf.req')}
-        </label>
-        <label className="fb-tf-flag">
-          <select
-            value={ltc.tf.shape ?? 'sin'}
-            onChange={(e) => updateTf({ ...ltc.tf, shape: e.target.value as TransferFunction['shape'] })}
-            className="fb-tf-shape-select"
-          >
-            <option value="sin">SIN</option>
-            <option value="invsin">INVSIN</option>
-            <option value="range">RANGE</option>
-            <option value="invrange">INVRANGE</option>
-          </select>
+        <span className="fb-tf-arrow">→</span>
+        <label className="fb-tf-param" title="End of transition zone">
+          <span className="fb-tf-param-label">To</span>
+          <input type="number" step="0.1" value={tf.decayEnd}
+            onChange={(e) => updateTf({ ...tf, decayEnd: +e.target.value })} />
+          <span className="fb-tf-unit">{unit}</span>
         </label>
       </div>
+
+      {/* Row 3: Floor + Strength */}
+      <div className="fb-tf-row fb-tf-row-floor">
+        <label className="fb-tf-param" title="Minimum output value (0–1)">
+          <span className="fb-tf-param-label">Floor</span>
+          <input type="number" min="0" max="1" step="0.01" value={tf.floor}
+            onChange={(e) => updateTf({ ...tf, floor: +e.target.value })} />
+        </label>
+        <label className="fb-tf-param" title="Multiplier strength (scales this layer)">
+          <span className="fb-tf-param-label">Strength</span>
+          <input type="number" min="0.1" max="3" step="0.1"
+            value={tf.multiplier}
+            onChange={(e) => updateTf({ ...tf, multiplier: +e.target.value })} />
+        </label>
+      </div>
+
+      {/* Curve preview */}
       <div className="fb-tf-curve">
-        <CurveEditor tf={ltc.tf} rangeMax={rangeMax} unit={unit} onChange={updateTf} />
+        <CurveEditor tf={tf} rangeMax={rangeMax} unit={unit} onChange={updateTf} />
       </div>
     </div>
   );
@@ -355,23 +361,29 @@ function LayerEditorContent({ layerId }: { layerId: LayerId }) {
 function EditPopover({
   layer,
   anchorRect,
+  weightValue,
   pinned,
+  duplicateCount,
   onPin,
   onClose: _onClose,
   onRemove,
+  onWeightChange,
   onMouseEnter,
   onMouseLeave,
 }: {
   layer: LayerMeta;
   anchorRect: DOMRect | null;
+  weightValue: number;
   pinned: boolean;
+  duplicateCount?: number;
   onPin: () => void;
   onClose: () => void;
   onRemove: () => void;
+  onWeightChange?: (next: number) => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
 }) {
-  const { soloLayer, setSoloLayer, setLayerWeight } = useAppStore();
+  const { soloLayer, setSoloLayer } = useAppStore();
   const t = useT();
   const isSolo = soloLayer === layer.id;
 
@@ -411,123 +423,23 @@ function EditPopover({
       {/* Weight slider */}
       <div className="fb-popover-weight">
         <span>{t('fp.weight')}</span>
-        <input type="range" min="0" max="2" step="0.1" value={layer.weight}
-          onChange={(e) => setLayerWeight(layer.id, parseFloat(e.target.value))} />
-        <span className="fb-popover-wval">{layer.weight.toFixed(1)}</span>
+        <input type="range" min="0" max="2" step="0.1" value={weightValue}
+          onChange={(e) => onWeightChange?.(parseFloat(e.target.value))} />
+        <span className="fb-popover-wval">{weightValue.toFixed(1)}</span>
       </div>
+
+      {duplicateCount && duplicateCount > 1 && (
+        <div className="fb-formula-warning" style={{ marginBottom: 8 }}>
+          <span className="fb-formula-warning-icon">!</span>
+          This layer is added {duplicateCount} times
+        </div>
+      )}
 
       {/* Layer-specific controls */}
       <div className="fb-popover-body">
         <LayerEditorContent layerId={layer.id} />
       </div>
     </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════════════════
-   FormulaChip – single layer chip in the bar (icon + weight badge).
-   ═══════════════════════════════════════════════════════════════════════ */
-
-function FormulaChip({
-  layer,
-  isPopoverTarget,
-  onHover,
-  onLeave,
-  onClick,
-  chipRef,
-}: {
-  layer: LayerMeta;
-  isPopoverTarget: boolean;
-  onHover: (rect: DOMRect) => void;
-  onLeave: () => void;
-  onClick: (rect: DOMRect) => void;
-  chipRef: (el: HTMLSpanElement | null) => void;
-}) {
-  const { configs, setLayerWeight, updateConfig, soloLayer } = useAppStore();
-  const isSolo = soloLayer === layer.id;
-  const ref = useRef<HTMLSpanElement | null>(null);
-  const dragStart = useRef<{ y: number; w: number } | null>(null);
-
-  const getRect = (): DOMRect =>
-    ref.current?.getBoundingClientRect() ?? new DOMRect();
-
-  /* ── weight scroll ───────────────────────────────────────────── */
-  const handleWeightWheel = useCallback(
-    (e: React.WheelEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const delta = e.deltaY < 0 ? 0.1 : -0.1;
-      const newW = Math.round(Math.max(0, Math.min(3, layer.weight + delta)) * 10) / 10;
-      setLayerWeight(layer.id, newW);
-    },
-    [layer.id, layer.weight, setLayerWeight],
-  );
-
-  /* ── weight drag ─────────────────────────────────────────────── */
-  const handleWeightDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dragStart.current = { y: e.clientY, w: layer.weight };
-      const move = (ev: MouseEvent) => {
-        if (!dragStart.current) return;
-        const dy = dragStart.current.y - ev.clientY; // up = positive
-        const newW = Math.round(Math.max(0, Math.min(3, dragStart.current.w + dy * 0.01)) * 10) / 10;
-        setLayerWeight(layer.id, newW);
-      };
-      const up = () => {
-        dragStart.current = null;
-        document.removeEventListener('mousemove', move);
-        document.removeEventListener('mouseup', up);
-      };
-      document.addEventListener('mousemove', move);
-      document.addEventListener('mouseup', up);
-    },
-    [layer.id, layer.weight, setLayerWeight],
-  );
-
-  /* ── icon scroll: multiplier / ctrl+scroll → plateauEnd shift ── */
-  const handleIconWheel = useCallback(
-    (e: React.WheelEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const tf = primaryTf(layer.id, configs);
-      if (!tf) return;
-      if (e.ctrlKey) {
-        // shift plateauEnd + decayEnd together
-        const delta = e.deltaY < 0 ? 1 : -1;
-        patchPrimaryTf(layer.id, configs, {
-          plateauEnd: Math.max(0, tf.plateauEnd + delta),
-          decayEnd: Math.max(tf.plateauEnd + delta + 1, tf.decayEnd + delta),
-        }, updateConfig);
-      } else {
-        // multiplier
-        const delta = e.deltaY < 0 ? 0.1 : -0.1;
-        const newM = Math.round(Math.max(0.1, Math.min(3, tf.multiplier + delta)) * 10) / 10;
-        patchPrimaryTf(layer.id, configs, { multiplier: newM }, updateConfig);
-      }
-    },
-    [layer.id, configs, updateConfig],
-  );
-
-  return (
-    <span
-      ref={(el) => { ref.current = el; chipRef(el); }}
-      className={`fb-chip ${isPopoverTarget ? 'active' : ''} ${isSolo ? 'solo' : ''}`}
-      onMouseEnter={() => onHover(getRect())}
-      onMouseLeave={onLeave}
-      onClick={() => onClick(getRect())}
-    >
-      <span className="fb-chip-icon" onWheel={handleIconWheel} title={layer.label}>
-        {layer.icon}
-      </span>
-      <span className="fb-chip-weight"
-        onWheel={handleWeightWheel}
-        onMouseDown={handleWeightDown}
-        title={`Weight: ${layer.weight.toFixed(1)} — scroll or drag to adjust`}>
-        {layer.weight.toFixed(1)}
-      </span>
-    </span>
   );
 }
 
@@ -548,10 +460,12 @@ function AddLayerButton({
   enabledLayers,
   allLayers,
   onAdd,
+  allowDuplicateAdds,
 }: {
   enabledLayers: LayerMeta[];
   allLayers: LayerMeta[];
   onAdd: (id: LayerId) => void;
+  allowDuplicateAdds?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [hoveredGroup, setHoveredGroup] = useState<number | null>(null);
@@ -617,18 +531,19 @@ function AddLayerButton({
                       const l = layerMap.get(id);
                       if (!l) return null;
                       const isAdded = enabledSet.has(id);
+                      const disabled = isAdded && !allowDuplicateAdds;
                       return (
                         <button key={id} className={`fb-add-dropdown-item ${isAdded ? 'is-added' : ''}`}
                           onClick={() => {
-                            if (isAdded) return;
+                            if (disabled) return;
                             onAdd(id);
                             setOpen(false);
                           }}
-                          disabled={isAdded}
-                          title={isAdded ? 'Already added' : ''}>
+                          disabled={disabled}
+                          title={disabled ? 'Already added' : isAdded ? 'Add again' : ''}>
                           <span className="fb-dd-icon">{l.icon}</span>
                           {t(`layer.${id}.label` as keyof Translations) || l.label}
-                          {isAdded && <span className="fb-add-check">✓</span>}
+                          {isAdded && <span className="fb-add-check">{allowDuplicateAdds ? '+1' : '✓'}</span>}
                         </button>
                       );
                     })}
@@ -643,18 +558,19 @@ function AddLayerButton({
             const l = layerMap.get(id);
             if (!l) return null;
             const isAdded = enabledSet.has(id);
+            const disabled = isAdded && !allowDuplicateAdds;
             return (
               <button key={id} className={`fb-add-dropdown-item ${isAdded ? 'is-added' : ''}`}
                 onClick={() => {
-                  if (isAdded) return;
+                  if (disabled) return;
                   onAdd(id);
                   setOpen(false);
                 }}
-                disabled={isAdded}
-                title={isAdded ? 'Already added' : ''}>
+                disabled={disabled}
+                title={disabled ? 'Already added' : isAdded ? 'Add again' : ''}>
                 <span className="fb-dd-icon">{l.icon}</span>
                 {t(`layer.${id}.label` as keyof Translations) || l.label}
-                {isAdded && <span className="fb-add-check">✓</span>}
+                {isAdded && <span className="fb-add-check">{allowDuplicateAdds ? '+1' : '✓'}</span>}
               </button>
             );
           })}
@@ -772,6 +688,10 @@ export default function FormulaBar() {
     setCustomFormula,
     formulaMode,
     setFormulaMode,
+    setLayerWeight,
+    updateConfig,
+    layerOrder,
+    setLayerOrder,
   } = useAppStore();
   const t = useT();
 
@@ -783,56 +703,162 @@ export default function FormulaBar() {
   const formulaWrapRef = useRef<HTMLDivElement>(null);
 
   // Popover state
-  const [hoveredId, setHoveredId] = useState<LayerId | null>(null);
-  const [pinnedId, setPinnedId] = useState<LayerId | null>(null);
+  const [hoveredChip, setHoveredChip] = useState<{ key: string; layerId: LayerId } | null>(null);
+  const [pinnedChip, setPinnedChip] = useState<{ key: string; layerId: LayerId } | null>(null);
   const [popoverRect, setPopoverRect] = useState<DOMRect | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const chipRefs = useRef<Map<LayerId, HTMLSpanElement>>(new Map());
-
-  const activeId = pinnedId ?? hoveredId;
+  const chipRefs = useRef<Map<string, HTMLSpanElement>>(new Map());
+  const activeChip = pinnedChip ?? hoveredChip;
+  const activeChipKey = activeChip?.key ?? null;
+  const activeId = activeChip?.layerId ?? null;
   const activeLayer = activeId ? layers.find((l) => l.id === activeId) : null;
+
+  // Drag-to-reorder state
+  type SectionKind = 'guard' | 'important' | 'sum';
+  const [dragReorder, setDragReorder] = useState<{ section: SectionKind; fromIdx: number } | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ section: SectionKind; idx: number } | null>(null);
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{ chipKey: string; layerId: LayerId; x: number; y: number; section: SectionKind } | null>(null);
 
   const enabledLayers = layers.filter((l) => l.enabled);
 
-  const requiredIndicators = useMemo<RequiredIndicator[]>(() => {
-    return enabledLayers
-      .map((layer) => {
-        const tf = layerTf(layer.id, configs);
-        if (!tf?.mandatory) return null;
-        const varName = LAYER_VAR[layer.id] ?? layer.id;
-        return {
-          id: layer.id,
-          icon: layer.icon,
-          label: t(`layer.${layer.id}.label` as keyof Translations) || layer.label,
-          thresholdText: `${t(`layer.${layer.id}.label` as keyof Translations) || layer.label} < ${tf.decayEnd}`,
-          varName,
-          decayEnd: tf.decayEnd,
-        };
-      })
-      .filter((v): v is RequiredIndicator => v !== null);
-  }, [configs, enabledLayers, t]);
-
   /** Deterministic raw formula generated from the current visual state. */
   const visualRawFormula = useMemo(
-    () => visualToRawFormula(enabledLayers, configs),
-    [enabledLayers, configs],
+    () => visualToRawFormula(enabledLayers, configs, layerOrder),
+    [enabledLayers, configs, layerOrder],
   );
 
-  /** Sum of all enabled layer weights — used for the visual `/N` display. */
-  const totalWeight = useMemo(
-    () => enabledLayers.reduce((s, l) => s + l.weight, 0),
-    [enabledLayers],
+
+  const normalizedCustom = useMemo(
+    () => normalizeUserFormulaInput(customFormula).trim(),
+    [customFormula],
   );
 
-  /**
-   * True when a custom raw formula is active in Visual mode and differs from
-   * what the chips would produce.  The heatmap is using the raw formula, not
-   * the visual pipeline — we show a notice so the user knows.
-   */
-  const hasCustomOverride = useMemo(
-    () => formulaMode === 'visual' && !!customFormula && customFormula.trim() !== visualRawFormula.trim(),
-    [formulaMode, customFormula, visualRawFormula],
+  const visualFormulaSource = useMemo(
+    () => (formulaMode === 'raw' ? normalizedCustom : '') || visualRawFormula,
+    [formulaMode, normalizedCustom, visualRawFormula],
   );
+
+  const visualAst = useMemo(() => {
+    try {
+      return parseFormula(visualFormulaSource);
+    } catch {
+      return null;
+    }
+  }, [visualFormulaSource]);
+
+  /** Structural analysis of the formula for sectioned rendering. */
+  const formulaSections = useMemo(() => {
+    if (!visualAst) return null;
+    return detectSimpleStructure(visualAst);
+  }, [visualAst]);
+
+  const buildFormulaFromSections = useCallback((sections: SimpleStructure): string => {
+    const termToCall = (term: SimpleTerm) => {
+      const args = [fmtN(term.M), fmtN(term.N)];
+      if (term.high != null || term.low != null) {
+        args.push(fmtN(term.high ?? 1), fmtN(term.low ?? 0));
+      }
+      return `${term.fn}(${term.varName}, ${args.join(', ')})`;
+    };
+
+    const guardParts = sections.guards.map((g) => `(${serializeAst(g)})`);
+    const importantParts = sections.importantTerms.map((t) => termToCall(t));
+    const sumTerms = sections.terms.map((t) => `weight(${fmtN(t.weight)}) * ${termToCall(t)}`);
+
+    const factors: string[] = [...guardParts, ...importantParts];
+    if (sumTerms.length > 0) {
+      const sumExpr = sumTerms.length > 1 ? `(${sumTerms.join(' + ')})` : sumTerms[0];
+      factors.push(sumExpr);
+    }
+
+    if (factors.length === 0) return '';
+    let out = factors.join(' * ');
+    if (sumTerms.length > 0) out += ' / weights';
+    return out;
+  }, []);
+
+  const activeSumIndex = useMemo(() => {
+    if (!activeChipKey?.startsWith('sum-')) return null;
+    const idx = Number.parseInt(activeChipKey.slice(4), 10);
+    return Number.isFinite(idx) ? idx : null;
+  }, [activeChipKey]);
+
+  const activeTermWeight = useMemo(() => {
+    if (activeSumIndex == null || !formulaSections) return null;
+    return formulaSections.terms[activeSumIndex]?.weight ?? null;
+  }, [activeSumIndex, formulaSections]);
+
+  const duplicateTfLayers = useMemo(() => {
+    if (!visualAst) return [] as { id: LayerId; count: number; icon: string; label: string }[];
+    const byVar = new Map<string, number>();
+    walkAst(visualAst, (node) => {
+      const tf = tfCallFromNode(node);
+      if (!tf) return;
+      byVar.set(tf.varName, (byVar.get(tf.varName) ?? 0) + 1);
+    });
+
+    const varToLayer = new Map<string, LayerMeta>();
+    for (const layer of layers) {
+      const varName = LAYER_VAR[layer.id];
+      if (varName) varToLayer.set(varName, layer);
+    }
+
+    const out: { id: LayerId; count: number; icon: string; label: string }[] = [];
+    for (const [varName, count] of byVar.entries()) {
+      if (count < 2) continue;
+      const layer = varToLayer.get(varName);
+      if (!layer) continue;
+      out.push({
+        id: layer.id,
+        count,
+        icon: layer.icon,
+        label: t(`layer.${layer.id}.label` as keyof Translations) || layer.label,
+      });
+    }
+    return out;
+  }, [layers, t, visualAst]);
+
+  const activeDuplicateCount = useMemo(() => {
+    if (!activeId) return 0;
+    return duplicateTfLayers.find((dup) => dup.id === activeId)?.count ?? 0;
+  }, [activeId, duplicateTfLayers]);
+
+  const ensureLayerEnabled = useCallback((id: LayerId) => {
+    const layer = layers.find((l) => l.id === id);
+    if (layer && !layer.enabled) toggleLayer(id);
+  }, [layers, toggleLayer]);
+
+  const handlePopoverWeightChange = useCallback((next: number) => {
+    const clamped = Math.max(0, parseFloat(next.toFixed(2)));
+
+    if (normalizedCustom && formulaSections && activeSumIndex != null && formulaSections.terms[activeSumIndex]) {
+      const nextTerms = formulaSections.terms.map((term, i) =>
+        i === activeSumIndex ? { ...term, weight: clamped } : term,
+      );
+      const nextFormula = buildFormulaFromSections({
+        ...formulaSections,
+        terms: nextTerms,
+        totalWeight: nextTerms.reduce((acc, t) => acc + t.weight, 0),
+      });
+      setCustomFormula(nextFormula);
+      setFormulaDraft(nextFormula);
+
+      if (activeId && activeDuplicateCount <= 1) {
+        ensureLayerEnabled(activeId);
+        setLayerWeight(activeId, clamped);
+      }
+      return;
+    }
+
+    if (activeId) {
+      ensureLayerEnabled(activeId);
+      setLayerWeight(activeId, clamped);
+    }
+  }, [activeDuplicateCount, activeId, activeSumIndex, buildFormulaFromSections, ensureLayerEnabled, formulaSections, normalizedCustom, setCustomFormula, setLayerWeight, setFormulaDraft]);
+
+  const allowDuplicateAdds = formulaMode !== 'raw' && !!normalizedCustom;
 
   /**
    * The formula shown in the raw textarea.  When in Visual mode the store's
@@ -854,8 +880,8 @@ export default function FormulaBar() {
     setCollapsed((prev) => {
       const next = !prev;
       if (next) {
-        setPinnedId(null);
-        setHoveredId(null);
+        setPinnedChip(null);
+        setHoveredChip(null);
         setViewOpen(false);
         setFormulaOpen(false);
       }
@@ -869,84 +895,834 @@ export default function FormulaBar() {
   }, []);
 
   const handlePopoverLeave = useCallback(() => {
-    if (!pinnedId) {
-      hoverTimer.current = setTimeout(() => setHoveredId(null), 300);
+    if (!pinnedChip) {
+      hoverTimer.current = setTimeout(() => setHoveredChip(null), 300);
     }
-  }, [pinnedId]);
-
-  /* ── Chip hover / click handlers ─────────────────────────────── */
-  const handleChipHover = useCallback((id: LayerId, rect: DOMRect) => {
-    if (pinnedId) return; // don't switch when pinned
-    if (hoverTimer.current) clearTimeout(hoverTimer.current);
-    // Instant show — no delay
-    setHoveredId(id);
-    setPopoverRect(rect);
-  }, [pinnedId]);
-
-  const handleChipLeave = useCallback(() => {
-    if (hoverTimer.current) clearTimeout(hoverTimer.current);
-    if (!pinnedId) {
-      hoverTimer.current = setTimeout(() => setHoveredId(null), 300);
-    }
-  }, [pinnedId]);
-
-  const handleChipClick = useCallback((id: LayerId, rect: DOMRect) => {
-    if (pinnedId === id) {
-      setPinnedId(null); // unpin
-    } else {
-      setPinnedId(id);
-      setPopoverRect(rect);
-      setHoveredId(null);
-    }
-  }, [pinnedId]);
+  }, [pinnedChip]);
 
   const handlePopoverPin = useCallback(() => {
-    if (activeId && !pinnedId) {
-      setPinnedId(activeId);
-      setHoveredId(null);
+    if (activeChip && !pinnedChip) {
+      setPinnedChip(activeChip);
+      setHoveredChip(null);
     }
-  }, [activeId, pinnedId]);
+  }, [activeChip, pinnedChip]);
 
   const handlePopoverClose = useCallback(() => {
-    setPinnedId(null);
-    setHoveredId(null);
+    setPinnedChip(null);
+    setHoveredChip(null);
   }, []);
 
-  const handlePopoverRemove = useCallback(() => {
-    if (activeId) {
-      toggleLayer(activeId);
-      setPinnedId(null);
-      setHoveredId(null);
+  /* ── Chip hover / click handlers ─────────────────────────────── */
+  const handleChipHover = useCallback((chipKey: string, id: LayerId) => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    const el = chipRefs.current.get(chipKey);
+    if (el) setPopoverRect(el.getBoundingClientRect());
+    setHoveredChip({ key: chipKey, layerId: id });
+  }, []);
+
+  const handleChipLeave = useCallback(() => {
+    if (!pinnedChip) {
+      hoverTimer.current = setTimeout(() => setHoveredChip(null), 300);
     }
-  }, [activeId, toggleLayer]);
+  }, [pinnedChip]);
+
+  const handleChipClick = useCallback((chipKey: string, id: LayerId) => {
+    ensureLayerEnabled(id);
+    const el = chipRefs.current.get(chipKey);
+    if (el) setPopoverRect(el.getBoundingClientRect());
+    if (pinnedChip?.key === chipKey) {
+      setPinnedChip(null);
+    } else {
+      setPinnedChip({ key: chipKey, layerId: id });
+      setHoveredChip(null);
+    }
+  }, [ensureLayerEnabled, pinnedChip]);
+
+  const handlePopoverRemove = useCallback(() => {
+    if (!activeId) return;
+
+    // In custom mode, remove only the active AST occurrence (chip), not the whole layer.
+    if (normalizedCustom && visualAst && activeChipKey && activeChipKey.startsWith('root')) {
+      const removeByKey = (node: AstNode, targetKey: string, currentKey: string): AstNode | null => {
+        if (currentKey === targetKey) return null;
+        if (node.kind === 'binop') {
+          const left = removeByKey(node.left, targetKey, `${currentKey}-l`);
+          const right = removeByKey(node.right, targetKey, `${currentKey}-r`);
+          if (!left && !right) return null;
+          if (!left) return right;
+          if (!right) return left;
+          return { ...node, left, right };
+        }
+        if (node.kind === 'unary') {
+          const expr = removeByKey(node.expr, targetKey, `${currentKey}-u`);
+          if (!expr) return null;
+          return { ...node, expr };
+        }
+        return node;
+      };
+
+      const nextAst = removeByKey(visualAst, activeChipKey, 'root');
+      const nextFormula = nextAst ? serializeAst(nextAst) : '';
+      setCustomFormula(nextFormula);
+      setFormulaDraft(nextFormula);
+
+      // If this layer no longer exists in formula, disable it in visual pipeline.
+      if (nextAst) {
+        const varName = LAYER_VAR[activeId];
+        if (varName) {
+          let stillUsed = false;
+          walkAst(nextAst, (node) => {
+            if (stillUsed) return;
+            const tf = tfCallFromNode(node);
+            if (tf && tf.varName === varName) {
+              stillUsed = true;
+              return;
+            }
+            const cmp = comparisonFromNode(node);
+            if (cmp && cmp.varName === varName) stillUsed = true;
+          });
+          if (!stillUsed) {
+            const layer = layers.find((l) => l.id === activeId);
+            if (layer?.enabled) toggleLayer(activeId);
+          }
+        }
+      }
+
+      setPinnedChip(null);
+      setHoveredChip(null);
+      return;
+    }
+
+    // Pure visual mode fallback: remove layer from enabled set.
+    toggleLayer(activeId);
+    setPinnedChip(null);
+    setHoveredChip(null);
+  }, [activeChipKey, activeId, layers, normalizedCustom, setCustomFormula, toggleLayer, visualAst]);
 
   /* ── [+] adds layer and pins its popover ─────────────────────── */
   const handleAddLayer = useCallback((id: LayerId) => {
+    if (allowDuplicateAdds) {
+      const term = buildLayerFormulaTerm(id, configs);
+      if (term) {
+        ensureLayerEnabled(id);
+        const base = normalizedCustom;
+        const next = base ? `${base} + ${term}` : term;
+        setCustomFormula(next);
+        setFormulaDraft(next);
+        setPinnedChip({ key: `layer:${id}`, layerId: id });
+        return;
+      }
+    }
+
     const layer = layers.find((l) => l.id === id);
     if (layer && !layer.enabled) toggleLayer(id);
-    // Open editing popover for the newly added layer after render
-    requestAnimationFrame(() => {
-      const el = chipRefs.current.get(id);
-      if (el) {
-        setPinnedId(id);
-        setPopoverRect(el.getBoundingClientRect());
-      } else {
-        setPinnedId(id);
+    // Open editing popover for the newly added layer
+    setPinnedChip({ key: `layer:${id}`, layerId: id });
+  }, [allowDuplicateAdds, configs, ensureLayerEnabled, layers, normalizedCustom, setCustomFormula, toggleLayer]);
+
+  /* ── Reverse lookup: variable name → LayerId ─────────────────── */
+  const varToLayerId = useMemo(() => {
+    const m = new Map<string, LayerId>();
+    for (const [id, varName] of Object.entries(LAYER_VAR)) m.set(varName, id as LayerId);
+    return m;
+  }, []);
+
+  /* ── Context-menu handler (right-click on chip) ──────────────── */
+  const handleChipContextMenu = useCallback((
+    e: React.MouseEvent,
+    chipKey: string,
+    layerId: LayerId,
+    section: 'guard' | 'important' | 'sum',
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ chipKey, layerId, x: e.clientX, y: e.clientY, section });
+  }, []);
+
+  /* ── Close context menu on outside click ─────────────────────── */
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handler = () => setContextMenu(null);
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [contextMenu]);
+
+  /* ── Change layer tier (mandatory / important / sum) ─────────── */
+  const patchTfFlag = useCallback((id: LayerId, patch: Partial<{ mandatory: boolean; important: boolean }>) => {
+    const c = configs;
+    const patchTfInner = (tf: TransferFunction) => ({ ...tf, ...patch });
+    switch (id) {
+      case 'terrainSlope':
+        updateConfig('terrain', { ...c.terrain, slope: { ...c.terrain.slope, tf: patchTfInner(c.terrain.slope.tf) } });
+        break;
+      case 'terrainElevation':
+        updateConfig('terrain', { ...c.terrain, elevation: { ...c.terrain.elevation, tf: patchTfInner(c.terrain.elevation.tf) } });
+        break;
+      case 'transit': updateConfig('transit', { ...c.transit, tf: patchTfInner(c.transit.tf) }); break;
+      case 'forest': updateConfig('forest', { ...c.forest, tf: patchTfInner(c.forest.tf) }); break;
+      case 'airQualityPm10':
+        updateConfig('airQuality', { ...c.airQuality, pm10: { ...c.airQuality.pm10, tf: patchTfInner(c.airQuality.pm10.tf) } });
+        break;
+      case 'airQualityNo2':
+        updateConfig('airQuality', { ...c.airQuality, no2: { ...c.airQuality.no2, tf: patchTfInner(c.airQuality.no2.tf) } });
+        break;
+      case 'crime': updateConfig('crime', { ...c.crime, tf: patchTfInner(c.crime.tf) }); break;
+      case 'healthcare': updateConfig('healthcare', { ...c.healthcare, tf: patchTfInner(c.healthcare.tf) }); break;
+      case 'schools': updateConfig('schools', { ...c.schools, tf: patchTfInner(c.schools.tf) }); break;
+      case 'internet': updateConfig('internet', { ...c.internet, tf: patchTfInner(c.internet.tf) }); break;
+      case 'climateTemp':
+        updateConfig('climate', { ...c.climate, temperature: { ...c.climate.temperature, tf: patchTfInner(c.climate.temperature.tf) } });
+        break;
+      case 'climateRainfall':
+        updateConfig('climate', { ...c.climate, rainfall: { ...c.climate.rainfall, tf: patchTfInner(c.climate.rainfall.tf) } });
+        break;
+      case 'rentalPrices': updateConfig('rentalPrices', { ...c.rentalPrices, tf: patchTfInner(c.rentalPrices.tf) }); break;
+      case 'employment': updateConfig('employment', { ...c.employment, tf: patchTfInner(c.employment.tf) }); break;
+      case 'amenities': updateConfig('amenities', { ...c.amenities, tf: patchTfInner(c.amenities.tf) }); break;
+      default: {
+        const metric = VOTE_ID_TO_METRIC[id];
+        if (metric) {
+          const terms = c.votes.terms.map((tm) =>
+            tm.metric === metric ? { ...tm, value: { ...tm.value, tf: patchTfInner(tm.value.tf) } } : tm,
+          );
+          updateConfig('votes', { terms });
+        }
+        break;
       }
+    }
+  }, [configs, updateConfig]);
+
+  const handleContextAction = useCallback((action: 'mandatory' | 'important' | 'sum' | 'remove') => {
+    if (!contextMenu) return;
+    const { layerId } = contextMenu;
+    switch (action) {
+      case 'mandatory':
+        patchTfFlag(layerId, { mandatory: true, important: false });
+        break;
+      case 'important':
+        patchTfFlag(layerId, { mandatory: false, important: true });
+        break;
+      case 'sum':
+        patchTfFlag(layerId, { mandatory: false, important: false });
+        break;
+      case 'remove':
+        // Re-use existing remove logic
+        handlePopoverRemove();
+        break;
+    }
+    // Tier changes invalidate any stale customFormula so visual mode
+    // regenerates from the updated configs immediately.
+    if (action !== 'remove') {
+      setCustomFormula('');
+      setFormulaDraft('');
+    }
+    setContextMenu(null);
+  }, [contextMenu, handlePopoverRemove, patchTfFlag, setCustomFormula]);
+
+  /* ── Pointer-based chip drag (angle-disambiguated) ─────────────
+   *
+   * pointerdown on a chip records start position + context.
+   * After 5 px of movement the angle decides the mode:
+   *   • horizontal ±14° → chip reorder
+   *   • vertical   ±20° from 90° → value adjustment (weight / param)
+   * ──────────────────────────────────────────────────────────────── */
+  const REORDER_HALF_ANGLE = 14;  // degrees from horizontal
+  const ADJUST_HALF_ANGLE = 20;   // degrees from vertical
+  const INTENT_THRESHOLD = 5;     // px before deciding
+
+  type ChipDragIntent = 'pending' | 'reorder' | 'adjust' | 'none';
+  const chipDragRef = useRef<{
+    intent: ChipDragIntent;
+    startX: number;
+    startY: number;
+    pointerId: number;
+    section: SectionKind;
+    idx: number;
+    /* value-adjust fields (only when target is a draggable number) */
+    adjustStartVal: number;
+    adjustStep: number;
+    adjustCb: ((v: number) => void) | null;
+  } | null>(null);
+
+  /** All chip elements by section-idx key, for hit-testing during reorder. */
+  const sectionChipRefs = useRef<Map<string, HTMLSpanElement>>(new Map());
+
+  const executeReorder = useCallback((section: SectionKind, fromIdx: number, toIdx: number) => {
+    if (fromIdx === toIdx) return;
+    if (section === 'sum' && !normalizedCustom && formulaSections) {
+      const sumTerms = formulaSections.terms;
+      const sumVarNames = sumTerms.map(t => t.varName);
+      const sumLayerIds = sumVarNames.map(vn => varToLayerId.get(vn)).filter(Boolean) as LayerId[];
+      const newOrder = [...sumLayerIds];
+      const [moved] = newOrder.splice(fromIdx, 1);
+      newOrder.splice(toIdx, 0, moved);
+      const sumSet = new Set(sumLayerIds);
+      const otherLayers = layerOrder.filter(id => !sumSet.has(id));
+      setLayerOrder([...otherLayers, ...newOrder]);
+    }
+    // guard / important reorder could be added later
+  }, [formulaSections, layerOrder, normalizedCustom, setLayerOrder, varToLayerId]);
+
+  /** Find the closest chip index in the same section based on pointer X. */
+  const findDropIndex = useCallback((section: SectionKind, clientX: number, fromIdx: number): number => {
+    let best = fromIdx;
+    let bestDist = Infinity;
+    sectionChipRefs.current.forEach((el, key) => {
+      if (!key.startsWith(section + '-')) return;
+      const idx = parseInt(key.split('-')[1], 10);
+      const rect = el.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const dist = Math.abs(clientX - cx);
+      if (dist < bestDist) { bestDist = dist; best = idx; }
     });
-  }, [layers, toggleLayer]);
+    return best;
+  }, []);
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const cd = chipDragRef.current;
+      if (!cd) return;
+
+      const dx = e.clientX - cd.startX;
+      const dy = e.clientY - cd.startY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (cd.intent === 'pending') {
+        if (dist < INTENT_THRESHOLD) return; // wait for threshold
+        const angleDeg = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
+        // Horizontal band: angle ∈ [0, REORDER_HALF_ANGLE] or [180-R, 180]
+        const isHorizontal = angleDeg < REORDER_HALF_ANGLE || angleDeg > (180 - REORDER_HALF_ANGLE);
+        // Vertical band: angle ∈ [90-A, 90+A]
+        const isVertical = Math.abs(angleDeg - 90) < ADJUST_HALF_ANGLE;
+
+        if (isHorizontal) {
+          cd.intent = 'reorder';
+          setDragReorder({ section: cd.section, fromIdx: cd.idx });
+          document.body.style.cursor = 'grabbing';
+        } else if (isVertical && cd.adjustCb) {
+          cd.intent = 'adjust';
+          document.body.style.cursor = 'ns-resize';
+        } else {
+          cd.intent = 'none'; // diagonal — ignore
+        }
+      }
+
+      if (cd.intent === 'reorder') {
+        const toIdx = findDropIndex(cd.section, e.clientX, cd.idx);
+        setDropTarget({ section: cd.section, idx: toIdx });
+      }
+
+      if (cd.intent === 'adjust' && cd.adjustCb) {
+        const upDy = cd.startY - e.clientY; // up = positive
+        cd.adjustCb(parseFloat((cd.adjustStartVal + upDy * cd.adjustStep).toFixed(2)));
+      }
+    };
+
+    const onUp = (e: PointerEvent) => {
+      const cd = chipDragRef.current;
+      if (!cd) return;
+      if (cd.intent === 'reorder' && dropTarget) {
+        executeReorder(cd.section, cd.idx, dropTarget.idx);
+      }
+      chipDragRef.current = null;
+      setDragReorder(null);
+      setDropTarget(null);
+      document.body.style.cursor = '';
+      // Release capture
+      try { (e.target as HTMLElement).releasePointerCapture(cd.pointerId); } catch { /* ok */ }
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [dropTarget, executeReorder, findDropIndex]);
+
+  /** Start chip drag intent tracking. Call from onPointerDown on the chip. */
+  const startChipDrag = useCallback((
+    e: React.PointerEvent,
+    section: SectionKind,
+    idx: number,
+    adjustVal?: number,
+    adjustStep?: number,
+    adjustCb?: (v: number) => void,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    chipDragRef.current = {
+      intent: 'pending',
+      startX: e.clientX,
+      startY: e.clientY,
+      pointerId: e.pointerId,
+      section,
+      idx,
+      adjustStartVal: adjustVal ?? 0,
+      adjustStep: adjustStep ?? 0.01,
+      adjustCb: adjustCb ?? null,
+    };
+  }, []);
+
+  /* ── Drag-to-adjust helper ───────────────────────────────────── */
+  const dragState = useRef<{
+    startY: number;
+    startVal: number;
+    step: number;
+    onDelta: (val: number) => void;
+  } | null>(null);
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const ds = dragState.current;
+      if (!ds) return;
+      const dy = ds.startY - e.clientY; // up = positive
+      ds.onDelta(parseFloat((ds.startVal + dy * ds.step).toFixed(2)));
+    };
+    const onUp = () => { dragState.current = null; };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, []);
+
+  const startDrag = useCallback((e: React.PointerEvent, startVal: number, onDelta: (v: number) => void, step: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    dragState.current = { startY: e.clientY, startVal, step, onDelta };
+  }, []);
+
+  /* ── Mutate an AST number node and re-serialize into customFormula ── */
+  const patchAstNumber = useCallback((node: AstNode, newVal: number) => {
+    if (!visualAst) return;
+    if (node.kind === 'number') node.value = newVal;
+    const newFormula = serializeAst(visualAst);
+    setCustomFormula(newFormula);
+    setFormulaDraft(newFormula);
+  }, [visualAst, setCustomFormula]);
+
+  /* ── Patch a single TF parameter in the store (standard visual mode) ── */
+  const patchTfParam = useCallback((id: LayerId, param: 'plateauEnd' | 'decayEnd', value: number) => {
+    const c = configs;
+    switch (id) {
+      case 'terrainSlope':
+        updateConfig('terrain', { ...c.terrain, slope: { ...c.terrain.slope, tf: { ...c.terrain.slope.tf, [param]: value } } });
+        break;
+      case 'terrainElevation':
+        updateConfig('terrain', { ...c.terrain, elevation: { ...c.terrain.elevation, tf: { ...c.terrain.elevation.tf, [param]: value } } });
+        break;
+      case 'transit':
+        updateConfig('transit', { ...c.transit, tf: { ...c.transit.tf, [param]: value } });
+        break;
+      case 'forest':
+        updateConfig('forest', { ...c.forest, tf: { ...c.forest.tf, [param]: value } });
+        break;
+      case 'airQualityPm10':
+        updateConfig('airQuality', { ...c.airQuality, pm10: { ...c.airQuality.pm10, tf: { ...c.airQuality.pm10.tf, [param]: value } } });
+        break;
+      case 'airQualityNo2':
+        updateConfig('airQuality', { ...c.airQuality, no2: { ...c.airQuality.no2, tf: { ...c.airQuality.no2.tf, [param]: value } } });
+        break;
+      case 'crime':
+        updateConfig('crime', { ...c.crime, tf: { ...c.crime.tf, [param]: value } });
+        break;
+      case 'healthcare':
+        updateConfig('healthcare', { ...c.healthcare, tf: { ...c.healthcare.tf, [param]: value } });
+        break;
+      case 'schools':
+        updateConfig('schools', { ...c.schools, tf: { ...c.schools.tf, [param]: value } });
+        break;
+      case 'internet':
+        updateConfig('internet', { ...c.internet, tf: { ...c.internet.tf, [param]: value } });
+        break;
+      case 'climateTemp':
+        updateConfig('climate', { ...c.climate, temperature: { ...c.climate.temperature, tf: { ...c.climate.temperature.tf, [param]: value } } });
+        break;
+      case 'climateRainfall':
+        updateConfig('climate', { ...c.climate, rainfall: { ...c.climate.rainfall, tf: { ...c.climate.rainfall.tf, [param]: value } } });
+        break;
+      case 'rentalPrices':
+        updateConfig('rentalPrices', { ...c.rentalPrices, tf: { ...c.rentalPrices.tf, [param]: value } });
+        break;
+      case 'employment':
+        updateConfig('employment', { ...c.employment, tf: { ...c.employment.tf, [param]: value } });
+        break;
+      case 'amenities':
+        updateConfig('amenities', { ...c.amenities, tf: { ...c.amenities.tf, [param]: value } });
+        break;
+      default: {
+        const metric = VOTE_ID_TO_METRIC[id];
+        if (metric) {
+          const terms = c.votes.terms.map((tm) =>
+            tm.metric === metric ? { ...tm, value: { ...tm.value, tf: { ...tm.value.tf, [param]: value } } } : tm,
+          );
+          updateConfig('votes', { terms });
+        }
+        break;
+      }
+    }
+  }, [configs, updateConfig]);
+
+  /* ── Compact chip for a recognized TF term ───────────────────── */
+  const showParams = formulaMode === 'visual'; // visual-short hides M,N
+  const renderCompactChip = useCallback((
+    layerId: LayerId | null,
+    icon: string,
+    weightNode: AstNode | null,
+    weightVal: number,
+    call: CallNode,
+    chipKey: string,
+  ): React.ReactNode => {
+    const mArg = call.args[1]; // plateauEnd
+    const nArg = call.args[2]; // decayEnd
+    const mVal = mArg?.kind === 'number' ? mArg.value : null;
+    const nVal = nArg?.kind === 'number' ? nArg.value : null;
+    const isActive = activeChipKey === chipKey;
+    const isSolo = layerId != null && soloLayer === layerId;
+    const isCustom = !!normalizedCustom;
+    const duplicateCount = layerId ? (duplicateTfLayers.find((d) => d.id === layerId)?.count ?? 0) : 0;
+    const canSyncStore = !isCustom || duplicateCount <= 1;
+    const chipCls = `fb-chip${isActive ? ' active' : ''}${isSolo ? ' solo' : ''}`;
+    const title = `${call.name}(${call.args.map((a) => a.kind === 'number' ? fmtN(a.value) : a.kind === 'identifier' ? a.name : '…').join(', ')})`;
+
+    /* drag callbacks: always sync store configs; also patch AST in custom mode */
+    const onWeightDrag = (v: number) => {
+      const clamped = Math.max(0, parseFloat(v.toFixed(2)));
+      if (layerId && canSyncStore) {
+        ensureLayerEnabled(layerId);
+        setLayerWeight(layerId, clamped);
+      }
+      if (isCustom && weightNode) patchAstNumber(weightNode, clamped);
+    };
+    const onMDrag = mArg ? (v: number) => {
+      if (layerId && canSyncStore) {
+        ensureLayerEnabled(layerId);
+        patchTfParam(layerId, 'plateauEnd', v);
+      }
+      if (isCustom) patchAstNumber(mArg, v);
+    } : undefined;
+    const onNDrag = nArg ? (v: number) => {
+      if (layerId && canSyncStore) {
+        ensureLayerEnabled(layerId);
+        patchTfParam(layerId, 'decayEnd', v);
+      }
+      if (isCustom) patchAstNumber(nArg, v);
+    } : undefined;
+
+    /** Step per pixel: weight is fine-grained, M/N proportional to magnitude */
+    const wStep = 0.01;
+    const paramStep = (val: number) => Math.max(0.2, Math.abs(val) * 0.002);
+
+    return (
+      <span
+        key={chipKey}
+        className={chipCls}
+        title={title}
+        ref={(el) => { if (el) chipRefs.current.set(chipKey, el); }}
+        onMouseEnter={() => layerId && handleChipHover(chipKey, layerId)}
+        onMouseLeave={handleChipLeave}
+        onClick={(e) => { e.stopPropagation(); layerId && handleChipClick(chipKey, layerId); }}
+      >
+        <span
+          className="fb-chip-weight"
+          onPointerDown={(e) => startDrag(e, weightVal, onWeightDrag, wStep)}
+        >
+          {fmtN(weightVal)}
+        </span>
+        <span className="fb-chip-icon">{icon}</span>
+        {showParams && mVal != null && (
+          <span
+            className="fb-chip-param"
+            onPointerDown={onMDrag ? (e) => startDrag(e, mVal, onMDrag, paramStep(mVal)) : undefined}
+          >
+            {fmtN(mVal)}
+          </span>
+        )}
+        {showParams && mVal != null && nVal != null && <span className="fb-chip-comma">,</span>}
+        {showParams && nVal != null && (
+          <span
+            className="fb-chip-param"
+            onPointerDown={onNDrag ? (e) => startDrag(e, nVal, onNDrag, paramStep(nVal)) : undefined}
+          >
+            {fmtN(nVal)}
+          </span>
+        )}
+      </span>
+    );
+  }, [activeChipKey, duplicateTfLayers, ensureLayerEnabled, soloLayer, normalizedCustom, configs, setLayerWeight, patchAstNumber, patchTfParam, startDrag, handleChipHover, handleChipLeave, handleChipClick, showParams]);
+
+  const renderVisualNode = useCallback((node: AstNode, key: string): React.ReactNode => {
+    /* ── Weighted TF term: w * SHAPE(var, M, N) → compact chip ── */
+    const weighted = weightedTfTerm(node);
+    if (weighted) {
+      const layerId = varToLayerId.get(weighted.varName) ?? null;
+      const layer = layerId ? layers.find((l) => l.id === layerId) : null;
+      return renderCompactChip(layerId, layer?.icon ?? 'ƒ', weighted.weightNode, weighted.weight, weighted.call, key);
+    }
+
+    /* ── Bare TF call: SHAPE(var, M, N) without weight → chip w=1 ── */
+    const tf = tfCallFromNode(node);
+    if (tf) {
+      const layerId = varToLayerId.get(tf.varName) ?? null;
+      const layer = layerId ? layers.find((l) => l.id === layerId) : null;
+      return renderCompactChip(layerId, layer?.icon ?? 'ƒ', null, 1, tf.call, key);
+    }
+
+    /* ── Comparison: var < N  →  visual badge ── */
+    const cmp = comparisonFromNode(node);
+    if (cmp) {
+      const layerId = varToLayerId.get(cmp.varName) ?? null;
+      const layer = layerId ? layers.find((l) => l.id === layerId) : null;
+      const isActive = activeChipKey === key;
+      const cls = `fb-chip fb-cmp-chip${isActive ? ' active' : ''}`;
+      const onCmpDrag = (v: number) => {
+        if (layerId) ensureLayerEnabled(layerId);
+        patchAstNumber(cmp.valueNode, Math.max(0, parseFloat(v.toFixed(2))));
+      };
+      return (
+        <span
+          className={cls}
+          key={key}
+          title={`${cmp.varName} ${cmp.op} ${fmtN(cmp.value)}`}
+          ref={(el) => { if (el) chipRefs.current.set(key, el); }}
+          onMouseEnter={() => layerId && handleChipHover(key, layerId)}
+          onMouseLeave={handleChipLeave}
+          onClick={(e) => { e.stopPropagation(); layerId && handleChipClick(key, layerId); }}
+        >
+          <span className="fb-chip-icon">{layer?.icon ?? cmp.varName}</span>
+          <span className="fb-cmp-op">{cmp.op}</span>
+          <span className="fb-cmp-val" onPointerDown={(e) => startDrag(e, cmp.value, onCmpDrag, 0.05)}>{fmtN(cmp.value)}</span>
+        </span>
+      );
+    }
+
+    /* ── Generic AST nodes ── */
+    if (node.kind === 'number') return <span className="fb-ast-token" key={key}>{fmtN(node.value)}</span>;
+    if (node.kind === 'identifier') return <span className="fb-ast-token" key={key}>{node.name}</span>;
+    if (node.kind === 'unary') {
+      return (
+        <span className="fb-ast-expr" key={key}>
+          <span className="fb-op">{node.op}</span>
+          {renderVisualNode(node.expr, `${key}-u`)}
+        </span>
+      );
+    }
+    if (node.kind === 'call') {
+      return (
+        <span className="fb-ast-token" key={key}>
+          {node.name}(
+          {node.args.map((a, i) => (
+            <span key={`${key}-a${i}`}>
+              {i > 0 && <span className="fb-op">,</span>}
+              {renderVisualNode(a, `${key}-arg${i}`)}
+            </span>
+          ))}
+          )
+        </span>
+      );
+    }
+    if (node.kind === 'binop') {
+      const left = renderVisualNode(node.left, `${key}-l`);
+      const right = renderVisualNode(node.right, `${key}-r`);
+      const leftWrapped = needsParen(node.left, node.op, 'left');
+      const rightWrapped = needsParen(node.right, node.op, 'right');
+      return (
+        <span className="fb-ast-expr" key={key}>
+          {leftWrapped ? <span className="fb-paren">(</span> : null}
+          {left}
+          {leftWrapped ? <span className="fb-paren">)</span> : null}
+          <span className="fb-op">{node.op}</span>
+          {rightWrapped ? <span className="fb-paren">(</span> : null}
+          {right}
+          {rightWrapped ? <span className="fb-paren">)</span> : null}
+        </span>
+      );
+    }
+    return <span className="fb-ast-token" key={key}>?</span>;
+  }, [activeChipKey, ensureLayerEnabled, handleChipClick, handleChipHover, handleChipLeave, layers, patchAstNumber, renderCompactChip, startDrag, varToLayerId]);
+
+  /* ── Render a SimpleTerm as a chip ───────────────────────────── */
+  const renderSimpleTerm = useCallback((term: SimpleTerm, chipKey: string, section: 'guard' | 'important' | 'sum', idx: number) => {
+    const layerId = varToLayerId.get(term.varName) ?? null;
+    const layer = layerId ? layers.find((l) => l.id === layerId) : null;
+    const icon = layer?.icon ?? 'ƒ';
+    const isActive = activeChipKey === chipKey;
+    const isSolo = layerId != null && soloLayer === layerId;
+    const cls = `fb-chip${isActive ? ' active' : ''}${isSolo ? ' solo' : ''}`;
+    const title = `${term.fn}(${term.varName}, ${fmtN(term.M)}, ${fmtN(term.N)})`;
+    const isDragTarget = dropTarget?.section === section && dropTarget?.idx === idx;
+
+    /* weight-adjust callback for vertical drag on the weight badge */
+    const onWeightDrag = section === 'sum' ? (v: number) => {
+      const clamped = Math.max(0, parseFloat(v.toFixed(2)));
+      if (layerId) { ensureLayerEnabled(layerId); setLayerWeight(layerId, clamped); }
+    } : undefined;
+
+    return (
+      <span
+        key={chipKey}
+        className={`${cls}${isDragTarget ? ' fb-drop-before' : ''}`}
+        title={title}
+        ref={(el) => {
+          if (el) { chipRefs.current.set(chipKey, el); sectionChipRefs.current.set(`${section}-${idx}`, el); }
+        }}
+        onPointerDown={(e) => {
+          // Only primary button
+          if (e.button !== 0) return;
+          // Determine if user pressed on a weight / param element
+          const target = e.target as HTMLElement;
+          const isWeight = target.classList.contains('fb-chip-weight');
+          startChipDrag(e, section, idx,
+            isWeight ? term.weight : undefined,
+            isWeight ? 0.01 : undefined,
+            isWeight ? onWeightDrag : undefined,
+          );
+        }}
+        onMouseEnter={() => layerId && handleChipHover(chipKey, layerId)}
+        onMouseLeave={handleChipLeave}
+        onClick={(e) => { e.stopPropagation(); layerId && handleChipClick(chipKey, layerId); }}
+        onContextMenu={(e) => layerId && handleChipContextMenu(e, chipKey, layerId, section)}
+      >
+        {section === 'sum' && (
+          <span className="fb-chip-weight" title={`weight(${fmtN(term.weight)})`}>{fmtN(term.weight)}</span>
+        )}
+        <span className="fb-chip-icon">{icon}</span>
+        {showParams && (
+          <>
+            <span className="fb-chip-param">{fmtN(term.M)}</span>
+            <span className="fb-chip-comma">,</span>
+            <span className="fb-chip-param">{fmtN(term.N)}</span>
+          </>
+        )}
+      </span>
+    );
+  }, [activeChipKey, dropTarget, ensureLayerEnabled, handleChipClick, handleChipContextMenu, handleChipHover, handleChipLeave, layers, setLayerWeight, showParams, soloLayer, startChipDrag, varToLayerId]);
+
+  /* ── Render a guard chip (comparison) ────────────────────────── */
+  const renderGuardChip = useCallback((guard: { varName: string; op: string; value: number }, chipKey: string, idx: number) => {
+    const layerId = varToLayerId.get(guard.varName) ?? null;
+    const layer = layerId ? layers.find((l) => l.id === layerId) : null;
+    const isActive = activeChipKey === chipKey;
+    const isDragTarget = dropTarget?.section === 'guard' && dropTarget?.idx === idx;
+    const cls = `fb-chip fb-cmp-chip${isActive ? ' active' : ''}${isDragTarget ? ' fb-drop-before' : ''}`;
+
+    return (
+      <span
+        className={cls}
+        key={chipKey}
+        title={`${guard.varName} ${guard.op} ${fmtN(guard.value)}`}
+        ref={(el) => {
+          if (el) { chipRefs.current.set(chipKey, el); sectionChipRefs.current.set(`guard-${idx}`, el); }
+        }}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          startChipDrag(e, 'guard', idx);
+        }}
+        onMouseEnter={() => layerId && handleChipHover(chipKey, layerId)}
+        onMouseLeave={handleChipLeave}
+        onClick={(e) => { e.stopPropagation(); layerId && handleChipClick(chipKey, layerId); }}
+        onContextMenu={(e) => layerId && handleChipContextMenu(e, chipKey, layerId, 'guard')}
+      >
+        <span className="fb-chip-icon">{layer?.icon ?? guard.varName}</span>
+        <span className="fb-cmp-op">{guard.op}</span>
+        <span className="fb-cmp-val">{fmtN(guard.value)}</span>
+      </span>
+    );
+  }, [activeChipKey, dropTarget, handleChipClick, handleChipContextMenu, handleChipHover, handleChipLeave, layers, startChipDrag, varToLayerId]);
+
+  /* ── Sectioned formula renderer ──────────────────────────────── */
+  const renderSectionedFormula = useMemo(() => {
+    if (!formulaSections) return null;
+    const { guards, importantTerms, terms, totalWeight } = formulaSections;
+
+    // Extract guard info for rendering
+    const guardInfos = guards.map(g => {
+      const left = g.left;
+      const right = g.right;
+      if (left.kind === 'identifier' && right.kind === 'number') {
+        return { varName: left.name, op: g.op, value: right.value };
+      }
+      return null;
+    }).filter(Boolean) as { varName: string; op: string; value: number }[];
+
+    const hasGuards = guardInfos.length > 0;
+    const hasImportant = importantTerms.length > 0;
+    const hasSum = terms.length > 0;
+
+    return (
+      <span className="fb-ast-formula fb-sectioned">
+        {/* Guard section */}
+        {hasGuards && (
+          <span className="fb-section fb-section-guard">
+            {guardInfos.map((g, i) => (
+              <span key={`guard-${i}`} className="fb-section-item">
+                {i > 0 && <span className="fb-op fb-section-op">×</span>}
+                {renderGuardChip(g, `guard-${i}`, i)}
+              </span>
+            ))}
+          </span>
+        )}
+
+        {/* Section divider: guards × important/sum */}
+        {hasGuards && (hasImportant || hasSum) && (
+          <span className="fb-section-divider">×</span>
+        )}
+
+        {/* Important section */}
+        {hasImportant && (
+          <span className="fb-section fb-section-important">
+            {importantTerms.map((term, i) => (
+              <span key={`imp-${i}`} className="fb-section-item">
+                {i > 0 && <span className="fb-op fb-section-op">×</span>}
+                {renderSimpleTerm(term, `imp-${i}`, 'important', i)}
+              </span>
+            ))}
+          </span>
+        )}
+
+        {/* Section divider: important × sum */}
+        {hasImportant && hasSum && (
+          <span className="fb-section-divider">×</span>
+        )}
+
+        {/* Sum section */}
+        {hasSum && (
+          <span className="fb-section fb-section-sum">
+            <span className="fb-paren">(</span>
+            {terms.map((term, i) => (
+              <span key={`sum-${i}`} className="fb-section-item">
+                {i > 0 && <span className="fb-op">+</span>}
+                {renderSimpleTerm(term, `sum-${i}`, 'sum', i)}
+              </span>
+            ))}
+            <span className="fb-paren">)</span>
+            {totalWeight !== 1 && (
+              <>
+                <span className="fb-op">/</span>
+                <span className="fb-ast-token" title={`weights = ${fmtN(totalWeight)}`}>{fmtN(totalWeight)}</span>
+              </>
+            )}
+          </span>
+        )}
+      </span>
+    );
+  }, [formulaSections, renderGuardChip, renderSimpleTerm]);
 
   /* ── Close popover on outside click ──────────────────────────── */
   useEffect(() => {
-    if (!pinnedId) return;
+    if (!pinnedChip) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (target.closest('.fb-popover') || target.closest('.fb-chip') || target.closest('.fb-add-wrap')) return;
-      setPinnedId(null);
+      setPinnedChip(null);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [pinnedId]);
+  }, [pinnedChip]);
 
   /* ── Close view dropdown on outside click ────────────────────── */
   useEffect(() => {
@@ -1000,17 +1776,48 @@ export default function FormulaBar() {
   return (
     <>
       {/* ── Editing popover ──────────────────────────────────────── */}
-      {activeLayer && activeLayer.enabled && (
+      {activeLayer && (
         <EditPopover
           layer={activeLayer}
           anchorRect={popoverRect}
-          pinned={!!pinnedId}
+          weightValue={activeTermWeight ?? activeLayer.weight}
+          pinned={!!pinnedChip}
+          duplicateCount={activeDuplicateCount}
           onPin={handlePopoverPin}
           onClose={handlePopoverClose}
           onRemove={handlePopoverRemove}
+          onWeightChange={handlePopoverWeightChange}
           onMouseEnter={handlePopoverEnter}
           onMouseLeave={handlePopoverLeave}
         />
+      )}
+
+      {/* ── Context menu (right-click on chip) ───────────────────── */}
+      {contextMenu && (
+        <div
+          className="fb-context-menu"
+          style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 2500 }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {contextMenu.section !== 'guard' && (
+            <button className="fb-context-item" onClick={() => handleContextAction('mandatory')}>
+              🛡 Make mandatory
+            </button>
+          )}
+          {contextMenu.section !== 'important' && (
+            <button className="fb-context-item" onClick={() => handleContextAction('important')}>
+              ⭐ Make important
+            </button>
+          )}
+          {contextMenu.section !== 'sum' && (
+            <button className="fb-context-item" onClick={() => handleContextAction('sum')}>
+              Σ Move to sum
+            </button>
+          )}
+          <button className="fb-context-item fb-context-remove" onClick={() => handleContextAction('remove')}>
+            × Remove
+          </button>
+        </div>
       )}
 
       {/* ── Formula bar ──────────────────────────────────────────── */}
@@ -1036,19 +1843,20 @@ export default function FormulaBar() {
                 <div className="fb-formula-editor-title">Score Formula</div>
                 <div className="fb-formula-mode-switch">
                   <button
+                    className={`fb-formula-mode-btn ${formulaMode === 'visual-short' ? 'active' : ''}`}
+                    onClick={() => setFormulaMode('visual-short')}
+                  >
+                    Short
+                  </button>
+                  <button
                     className={`fb-formula-mode-btn ${formulaMode === 'visual' ? 'active' : ''}`}
-                    onClick={() => {
-                      // Switch to Visual — keep customFormula so it stays active;
-                      // user can clear it explicitly via the override badge.
-                      setFormulaMode('visual');
-                    }}
+                    onClick={() => setFormulaMode('visual')}
                   >
                     Visual
                   </button>
                   <button
                     className={`fb-formula-mode-btn ${formulaMode === 'raw' ? 'active' : ''}`}
                     onClick={() => {
-                      // Seed the raw textarea from the current visual formula
                       const raw = visualRawFormula;
                       setFormulaDraft(raw);
                       setCustomFormula(raw);
@@ -1094,73 +1902,23 @@ export default function FormulaBar() {
 
           <span className="fb-label">Score =</span>
 
-          {hasCustomOverride && (
-            <span className="fb-custom-override">
-              <span className="fb-custom-override-formula" title={customFormula}>
-                {customFormula.length > 56 ? customFormula.slice(0, 53) + '…' : customFormula}
-              </span>
-              <button
-                className="fb-custom-override-clear"
-                title="Revert to visual formula"
-                onClick={() => setCustomFormula('')}
-              >
-                ×
-              </button>
-            </span>
-          )}
+          {formulaMode !== 'raw' ? (
+            renderSectionedFormula ? (
+              renderSectionedFormula
+            ) : visualAst ? (
+              <span className="fb-ast-formula">{renderVisualNode(visualAst, 'root')}</span>
+            ) : (
+              <span className="fb-raw-preview"><span>{visualFormulaSource}</span></span>
+            )
+          ) : null}
 
-          {formulaMode === 'visual' && !hasCustomOverride && requiredIndicators.length > 0 && (
-            <>
-              {requiredIndicators.map((req) => (
-                <span key={req.id} className="fb-required-badge" title={req.thresholdText}>
-                  {req.icon}!
-                </span>
-              ))}
-              <span className="fb-op">×</span>
-              <span className="fb-paren">(</span>
-            </>
-          )}
-
-          {formulaMode === 'visual' && (
-            <span style={{
-              display: 'flex', alignItems: 'center', gap: '6px',
-              ...(hasCustomOverride ? { opacity: 0.35, pointerEvents: 'none' } : {}),
-            }}>
-              {enabledLayers.map((layer, idx) => (
-                <span key={layer.id} style={{ display: 'contents' }}>
-                  {idx > 0 && <span className="fb-op">+</span>}
-                  <FormulaChip
-                    layer={layer}
-                    isPopoverTarget={activeId === layer.id}
-                    onHover={(rect) => handleChipHover(layer.id, rect)}
-                    onLeave={handleChipLeave}
-                    onClick={(rect) => handleChipClick(layer.id, rect)}
-                    chipRef={(el) => {
-                      if (el) chipRefs.current.set(layer.id, el);
-                      else chipRefs.current.delete(layer.id);
-                    }}
-                  />
-                </span>
-              ))}
-            </span>
-          )}
-
-          {formulaMode === 'visual' && !hasCustomOverride && (requiredIndicators.length > 0 || totalWeight !== 1) && (
-            <>
-              {requiredIndicators.length > 0 && <span className="fb-paren">)</span>}
-              {totalWeight !== 1 && (
-                <>
-                  <span className="fb-op">/</span>
-                  <span className="fb-paren">
-                    {Number.isInteger(totalWeight) ? totalWeight : parseFloat(totalWeight.toFixed(2))}
-                  </span>
-                </>
-              )}
-            </>
-          )}
-
-          {formulaMode === 'visual' ? (
-            <AddLayerButton enabledLayers={enabledLayers} allLayers={layers} onAdd={handleAddLayer} />
+          {formulaMode !== 'raw' ? (
+            <AddLayerButton
+              enabledLayers={enabledLayers}
+              allLayers={layers}
+              onAdd={handleAddLayer}
+              allowDuplicateAdds={allowDuplicateAdds}
+            />
           ) : (
             <span className="fb-raw-preview">
               <span>{formulaDraft || visualRawFormula}</span>

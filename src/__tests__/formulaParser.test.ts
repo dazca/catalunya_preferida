@@ -9,7 +9,10 @@ import {
 import {
   validateCustomFormula,
   evaluateCustomFormula,
+  visualToRawFormula,
 } from '../utils/formulaEngine';
+import { DEFAULT_LAYER_CONFIGS, defaultTf } from '../types/transferFunction';
+import type { LayerMeta } from '../types';
 
 /* ── formulaParser ─────────────────────────────────────────────────── */
 
@@ -145,6 +148,51 @@ describe('serializeAst', () => {
   });
 });
 
+describe('parser round-trip stability', () => {
+  const stableCases = [
+    'weight(1) * SIN(slope, 12, 20) / weights',
+    '(weight(0.79) * SIN(slope, 8.69, 13.29) + weight(1) * SIN(elevation, 982.2033, 2067.3729)) / weights',
+    '(slope < 13.29) * (weight(0.79) * SIN(slope, 8.69, 13.29) + weight(1) * SIN(elevation, 982.2033, 2067.3729)) / weights',
+    '(slope < 13.29) * SIN(elevation, 982.2033, 2067.3729) * (weight(0.79) * SIN(slope, 8.69, 13.29) + weight(1) * INVSIN(transit, 4, 10)) / weights',
+    '2 * (weight(1) * SIN(slope, 12, 20) + weight(0.6) * INVRANGE(transit, 4, 10)) / weights',
+    '(weight(1) * SIN(slope, 12, 20) + SIN(elevation, 400, 1800)) / weights',
+    'IF(slope < 20, (weight(1) * SIN(slope, 5, 20) + weight(1) * SIN(elevation, 400, 1800)) / weights, 0)',
+    'CLAMP((weight(1) * SIN(slope, 5, 20) + weight(2) * SIN(elevation, 400, 1800)) / weights, 0, 1)',
+    'MIN((weight(1) * SIN(slope, 12, 20)) / weights, (weight(1) * INVSIN(transit, 4, 10)) / weights)',
+    '(weight(1) * RANGE(slope, 5, 20, 0.9, 0.2) + weight(0.5) * INVRANGE(transit, 2, 12, 0.8, 0.1)) / weights',
+  ];
+
+  it('is idempotent across parse → serialize → parse → serialize for many formulas', () => {
+    for (const src of stableCases) {
+      const once = serializeAst(parseFormula(src));
+      const twice = serializeAst(parseFormula(once));
+      expect(twice).toBe(once);
+    }
+  });
+});
+
+describe('raw ↔ visual compatibility (chip preservation)', () => {
+  const visualCompatibleCases = [
+    'weight(1) * SIN(slope, 12, 20) / weights',
+    '(weight(0.79) * SIN(slope, 8.69, 13.29) + weight(1) * SIN(elevation, 982.2033, 2067.3729)) / weights',
+    '(slope < 13.29) * (weight(0.79) * SIN(slope, 8.69, 13.29) + weight(1) * SIN(elevation, 982.2033, 2067.3729)) / weights',
+    '(slope < 13.29) * SIN(elevation, 982.2033, 2067.3729) * (weight(0.79) * SIN(slope, 8.69, 13.29) + weight(1) * INVSIN(transit, 4, 10)) / weights',
+    // Missing weight(...) should default to weight 1 when re-entering visual mode
+    '(weight(0.79) * SIN(slope, 8.69, 13.29) + SIN(elevation, 982.2033, 2067.3729)) / weights',
+    // Bare numeric factor outside sum should not be interpreted as a layer weight
+    '2 * (weight(1) * SIN(slope, 12, 20) + weight(1) * SIN(elevation, 400, 1800)) / weights',
+  ];
+
+  it('keeps simple structure detectable after parse/serialize (no chip loss)', () => {
+    for (const src of visualCompatibleCases) {
+      const canonical = serializeAst(parseFormula(src));
+      const parsed = detectSimpleStructure(parseFormula(canonical));
+      expect(parsed).not.toBeNull();
+      expect(parsed!.terms.length).toBeGreaterThan(0);
+    }
+  });
+});
+
 describe('walkAst', () => {
   it('visits all nodes in a formula', () => {
     const ast = parseFormula('SIN(slope, 12, 20) + elevation');
@@ -170,10 +218,11 @@ describe('walkAst', () => {
 
 describe('detectSimpleStructure', () => {
   it('detects a single-term visual formula', () => {
-    const ast = parseFormula('1 * SIN(slope, 12, 20)');
+    const ast = parseFormula('weight(1) * SIN(slope, 12, 20) / weights');
     const s = detectSimpleStructure(ast);
     expect(s).not.toBeNull();
     expect(s!.terms).toHaveLength(1);
+    expect(s!.importantTerms).toHaveLength(0);
     expect(s!.terms[0].fn).toBe('SIN');
     expect(s!.terms[0].varName).toBe('slope');
     expect(s!.terms[0].weight).toBe(1);
@@ -182,6 +231,78 @@ describe('detectSimpleStructure', () => {
   });
 
   it('detects a two-term sum with totalWeight', () => {
+    const ast = parseFormula('(weight(1) * SIN(slope, 12, 20) + weight(1) * SIN(elevation, 400, 1800)) / weights');
+    const s = detectSimpleStructure(ast);
+    expect(s).not.toBeNull();
+    expect(s!.terms).toHaveLength(2);
+    expect(s!.importantTerms).toHaveLength(0);
+    expect(s!.totalWeight).toBe(2);
+  });
+
+  it('detects guard prefix', () => {
+    const ast = parseFormula('(slope < 20) * weight(1) * SIN(slope, 12, 20) / weights');
+    const s = detectSimpleStructure(ast);
+    expect(s).not.toBeNull();
+    expect(s!.guards).toHaveLength(1);
+    expect(s!.guards[0].op).toBe('<');
+  });
+
+  it('detects important terms (bare TF calls as multiplicative factors)', () => {
+    const ast = parseFormula('SIN(elevation, 0, 1500) * (weight(1) * SIN(slope, 5, 20) + weight(1) * INVSIN(transit, 4, 10)) / weights');
+    const s = detectSimpleStructure(ast);
+    expect(s).not.toBeNull();
+    expect(s!.importantTerms).toHaveLength(1);
+    expect(s!.importantTerms[0].fn).toBe('SIN');
+    expect(s!.importantTerms[0].varName).toBe('elevation');
+    expect(s!.terms).toHaveLength(2);
+    expect(s!.totalWeight).toBe(2);
+  });
+
+  it('detects guards + important + sum together', () => {
+    // Needs additions in the sum so detectSimpleStructure can distinguish important from sum
+    const ast = parseFormula(
+      '(slope < 20) * SIN(elevation, 0, 1500) * (weight(1) * INVSIN(transit, 4, 10) + weight(2) * SIN(slope, 12, 20)) / weights'
+    );
+    const s = detectSimpleStructure(ast);
+    expect(s).not.toBeNull();
+    expect(s!.guards).toHaveLength(1);
+    expect(s!.importantTerms).toHaveLength(1);
+    expect(s!.importantTerms[0].varName).toBe('elevation');
+    expect(s!.terms).toHaveLength(2);
+    expect(s!.totalWeight).toBe(3);
+  });
+
+  it('detects no-plus chain as important * term (user raw style)', () => {
+    const ast = parseFormula('SIN(slope, 8.69, 13.29) * weight(1) * SIN(elevation, 982.2033, 2067.3729) / weights');
+    const s = detectSimpleStructure(ast);
+    expect(s).not.toBeNull();
+    expect(s!.importantTerms).toHaveLength(1);
+    expect(s!.importantTerms[0].varName).toBe('slope');
+    expect(s!.terms).toHaveLength(1);
+    expect(s!.terms[0].varName).toBe('elevation');
+    expect(s!.terms[0].weight).toBe(1);
+    expect(s!.totalWeight).toBe(1);
+  });
+
+  it('defaults missing weight() to 1 for a sum term', () => {
+    const ast = parseFormula('(weight(0.79) * SIN(slope, 8.69, 13.29) + SIN(elevation, 982.2033, 2067.3729)) / weights');
+    const s = detectSimpleStructure(ast);
+    expect(s).not.toBeNull();
+    expect(s!.terms).toHaveLength(2);
+    expect(s!.terms[0].weight).toBeCloseTo(0.79, 6);
+    expect(s!.terms[1].weight).toBe(1);
+    expect(s!.totalWeight).toBeCloseTo(1.79, 6);
+  });
+
+  it('does not treat bare numeric constants as chip weight when weight() exists', () => {
+    const ast = parseFormula('2 * weight(1) * SIN(slope, 12, 20) / weights');
+    const s = detectSimpleStructure(ast);
+    expect(s).not.toBeNull();
+    expect(s!.terms).toHaveLength(1);
+    expect(s!.terms[0].weight).toBe(1);
+  });
+
+  it('also supports legacy numeric divisor', () => {
     const ast = parseFormula('(1 * SIN(slope, 12, 20) + 1 * SIN(elevation, 400, 1800)) / 2');
     const s = detectSimpleStructure(ast);
     expect(s).not.toBeNull();
@@ -189,18 +310,71 @@ describe('detectSimpleStructure', () => {
     expect(s!.totalWeight).toBe(2);
   });
 
-  it('detects guard prefix', () => {
-    const ast = parseFormula('(slope < 20) * 1 * SIN(slope, 12, 20)');
-    const s = detectSimpleStructure(ast);
-    expect(s).not.toBeNull();
-    expect(s!.guards).toHaveLength(1);
-    expect(s!.guards[0].op).toBe('<');
-  });
-
   it('returns null for arbitrary formula', () => {
     const ast = parseFormula('SQRT(slope) + ABS(elevation)');
     const s = detectSimpleStructure(ast);
     expect(s).toBeNull();
+  });
+});
+
+/* ── visualToRawFormula with important layers ───────────────────────── */
+
+describe('visualToRawFormula — 3 sections', () => {
+  const mkLayer = (id: string, weight = 1, enabled = true): LayerMeta => ({
+    id: id as LayerMeta['id'],
+    label: id,
+    description: '',
+    icon: '📐',
+    enabled,
+    weight,
+  });
+
+  it('places important layers as multiplicative factors outside sum', () => {
+    const cfgs = structuredClone(DEFAULT_LAYER_CONFIGS);
+    cfgs.terrain.elevation.tf.important = true;
+    const layers = [mkLayer('terrainSlope'), mkLayer('terrainElevation')];
+    const raw = visualToRawFormula(layers, cfgs);
+    // Important elevation should be outside the sum, slope inside
+    expect(raw).toContain('SIN(elevation');
+    expect(raw).toContain('SIN(slope');
+    // weight() wraps the summed term's weight
+    expect(raw).toContain('weight(1)');
+    // Important term multiplied with sum
+    expect(raw).toMatch(/SIN\(elevation.*\*.*SIN\(slope/);
+    // Always ends with / weights
+    expect(raw).toContain('/ weights');
+  });
+
+  it('handles guards + important + sum together', () => {
+    const cfgs = structuredClone(DEFAULT_LAYER_CONFIGS);
+    cfgs.terrain.slope.tf.mandatory = true;
+    cfgs.terrain.elevation.tf.important = true;
+    const layers = [mkLayer('terrainSlope'), mkLayer('terrainElevation'), mkLayer('transit')];
+    const raw = visualToRawFormula(layers, cfgs);
+    // Guard: (slope < ...)
+    expect(raw).toMatch(/\(slope\s*</);
+    // Important: SIN(elevation, ...) as multiplier
+    expect(raw).toContain('SIN(elevation');
+    // Sum: weight() wrapped terms
+    expect(raw).toContain('weight(1) * SIN(slope');
+    expect(raw).toContain('weight(1) * SIN(transit');
+    // Divisor is 'weights' keyword
+    expect(raw).toContain('/ weights');
+  });
+
+  it('round-trips: visualToRaw → parse → detectSimpleStructure', () => {
+    const cfgs = structuredClone(DEFAULT_LAYER_CONFIGS);
+    cfgs.terrain.slope.tf.mandatory = true;
+    cfgs.terrain.elevation.tf.important = true;
+    const layers = [mkLayer('terrainSlope'), mkLayer('terrainElevation'), mkLayer('transit')];
+    const raw = visualToRawFormula(layers, cfgs);
+    const ast = parseFormula(raw);
+    const s = detectSimpleStructure(ast);
+    expect(s).not.toBeNull();
+    expect(s!.guards.length).toBeGreaterThanOrEqual(1);
+    expect(s!.importantTerms.length).toBe(1);
+    expect(s!.importantTerms[0].varName).toBe('elevation');
+    expect(s!.terms.length).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -269,5 +443,27 @@ describe('formulaEngine — math builtins', () => {
   it('rejects an invalid formula', () => {
     const r = validateCustomFormula('SQRT(((slope)');
     expect(r.ok).toBe(false);
+  });
+
+  it('evaluates weight() as identity and weights as sum of all weight() values', () => {
+    // weight(0.5) * SIN(slope,0,45) + weight(1) * SIN(elevation,0,2000)
+    // weights = 0.5 + 1 = 1.5
+    // With slope=0 → SIN=1, elevation=0 → SIN=1:
+    // (0.5*1 + 1*1) / 1.5 = 1.5/1.5 = 1
+    const v = evaluateCustomFormula(
+      '(weight(0.5) * SIN(slope, 0, 45) + weight(1) * SIN(elevation, 0, 2000)) / weights',
+      { slope: 0, elevation: 0 },
+    );
+    expect(v).toBeCloseTo(1, 5);
+  });
+
+  it('treats bare 2* as constant multiplier, not a weight', () => {
+    // 2 * SIN(slope, 0, 45) / weights — no weight() calls → weights defaults to 1
+    // With slope=0 → SIN=1 → 2*1/1 = 2, clamped to 1
+    const v = evaluateCustomFormula(
+      '2 * SIN(slope, 0, 45)',
+      { slope: 0 },
+    );
+    expect(v).toBeCloseTo(1, 5); // clamped to [0,1]
   });
 });

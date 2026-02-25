@@ -317,15 +317,27 @@ export interface SimpleTerm {
 
 /**
  * Describes the "simple visual" formula structure:
- *   (guard₁) * (guard₂) * ... * (term₁ + term₂ + ...) / totalWeight
+ *   (guard₁) * (guard₂) * ... * imp₁ * imp₂ * ... * (term₁ + term₂ + ...) / totalWeight
  */
 export interface SimpleStructure {
   guards: BinopNode[];
+  /** Important terms: bare TF calls acting as multiplicative soft-gates outside the sum. */
+  importantTerms: SimpleTerm[];
   terms: SimpleTerm[];
   totalWeight: number;
 }
 
 const TF_FNS = new Set(['SIN', 'INVSIN', 'RANGE', 'INVRANGE']);
+
+/** Check if a node is a `WEIGHT(n)` call. */
+function isWeightCall(node: AstNode): node is CallNode {
+  return node.kind === 'call' && node.name === 'WEIGHT' && node.args.length === 1 && node.args[0].kind === 'number';
+}
+
+/** Extract the numeric value from a `WEIGHT(n)` node. */
+function weightValue(node: CallNode): number {
+  return (node.args[0] as NumberNode).value;
+}
 
 /**
  * Attempt to detect if the AST represents the canonical visual formula
@@ -335,45 +347,129 @@ const TF_FNS = new Set(['SIN', 'INVSIN', 'RANGE', 'INVRANGE']);
  * `visualToRawFormula`:  `guard * w * FN(...) + ...`
  */
 export function detectSimpleStructure(node: AstNode): SimpleStructure | null {
-  // Strip outer `/ totalWeight`
-  let sumNode: AstNode = node;
-  let totalWeight = 1;
+  // Strip outer `/ weights` (identifier) or `/ number` (legacy)
+  let innerNode: AstNode = node;
+  let totalWeight = -1; // -1 = not yet determined (will compute from weight() calls)
 
-  if (node.kind === 'binop' && node.op === '/' && node.right.kind === 'number') {
-    totalWeight = (node.right as NumberNode).value;
-    sumNode = node.left;
+  if (node.kind === 'binop' && node.op === '/') {
+    if (node.right.kind === 'identifier' && (node.right as IdentNode).name === 'weights') {
+      innerNode = node.left;
+    } else if (node.right.kind === 'number') {
+      // Legacy: explicit numeric divisor
+      totalWeight = (node.right as NumberNode).value;
+      innerNode = node.left;
+    }
   }
 
-  // Collect additive terms (sum split by +)
-  const addTermNodes = flattenAdd(sumNode);
+  // Flatten top-level multiplication to split guards and non-guard factors.
+  const topFactors = flattenMul(innerNode);
 
   const guards: BinopNode[] = [];
-  const terms: SimpleTerm[] = [];
+  const nonGuardFactors: AstNode[] = [];
 
-  for (const termNode of addTermNodes) {
-    // Flatten the * chain for this additive term
-    const factors = flattenMul(termNode);
-
-    // Separate comparison guards from numeric/call factors
-    const localGuards: BinopNode[] = [];
-    const rest: AstNode[] = [];
-
-    for (const f of factors) {
-      if (isComparison(f)) localGuards.push(f as BinopNode);
-      else rest.push(f);
+  for (const f of topFactors) {
+    if (isComparison(f)) {
+      guards.push(f as BinopNode);
+    } else {
+      nonGuardFactors.push(f);
     }
-
-    // guards only ever appear in the first term (or all terms may share them)
-    guards.push(...localGuards.filter((g) => !guards.some((eg) => eg === g)));
-
-    // rest should be [weight?, call] or [call]
-    const term = tryBuildTerm(rest);
-    if (!term) return null;
-    terms.push(term);
   }
 
-  if (terms.length === 0) return null;
-  return { guards, terms, totalWeight };
+  // Look for a factor whose root is '+' — that's the sum body.
+  // Only when a sum body exists can we classify other bare TF calls as important.
+  const sumIdx = nonGuardFactors.findIndex(f => f.kind === 'binop' && f.op === '+');
+
+  const importantTerms: SimpleTerm[] = [];
+  const terms: SimpleTerm[] = [];
+
+  if (sumIdx >= 0) {
+    // ── Has addition → separate important terms from sum ──────────
+    const sumBody = nonGuardFactors[sumIdx];
+
+    for (let i = 0; i < nonGuardFactors.length; i++) {
+      if (i === sumIdx) continue;
+      const f = nonGuardFactors[i];
+      if (f.kind === 'call' && TF_FNS.has(f.name)) {
+        const extracted = tryExtractTfCall(f as CallNode);
+        if (extracted) {
+          importantTerms.push({ ...extracted, weight: 1 });
+        } else {
+          return null;
+        }
+      } else if (f.kind === 'number') {
+        // Numeric multiplier outside sum — ignore (e.g. stray "1")
+      } else {
+        return null; // unrecognized factor
+      }
+    }
+
+    // Parse sum body additive terms
+    const addTermNodes = flattenAdd(sumBody);
+    for (const termNode of addTermNodes) {
+      const factors = flattenMul(termNode);
+      // Separate any inline comparison guards
+      const localGuards: BinopNode[] = [];
+      const rest: AstNode[] = [];
+      for (const f of factors) {
+        if (isComparison(f)) localGuards.push(f as BinopNode);
+        else rest.push(f);
+      }
+      guards.push(...localGuards.filter(g => !guards.some(eg => eg === g)));
+      const term = tryBuildTerm(rest);
+      if (!term) return null;
+      terms.push(term);
+    }
+  } else {
+    // ── No addition at top-level ───────────────────────────────────────
+    // We support two patterns:
+    //   1) plain single term: weight(...) * FN(...)
+    //   2) important * term:  FN(...) * weight(...) * FN(...)
+    //      (used when users omit explicit parentheses around the sum)
+    const tfIdxs: number[] = [];
+    for (let i = 0; i < nonGuardFactors.length; i++) {
+      const f = nonGuardFactors[i];
+      if (f.kind === 'call' && TF_FNS.has(f.name)) tfIdxs.push(i);
+    }
+
+    if (tfIdxs.length === 0) return null;
+
+    if (tfIdxs.length === 1) {
+      const term = tryBuildTerm(nonGuardFactors);
+      if (!term) return null;
+      terms.push(term);
+    } else {
+      // Treat all TF calls before the last as important soft gates.
+      const lastTfIdx = tfIdxs[tfIdxs.length - 1];
+      const termFactors: AstNode[] = [];
+
+      for (let i = 0; i < nonGuardFactors.length; i++) {
+        const f = nonGuardFactors[i];
+        const isTf = f.kind === 'call' && TF_FNS.has(f.name);
+
+        if (isTf && i !== lastTfIdx) {
+          const extracted = tryExtractTfCall(f as CallNode);
+          if (!extracted) return null;
+          importantTerms.push({ ...extracted, weight: 1 });
+          continue;
+        }
+
+        termFactors.push(f);
+      }
+
+      const term = tryBuildTerm(termFactors);
+      if (!term) return null;
+      terms.push(term);
+    }
+  }
+
+  if (terms.length === 0 && importantTerms.length === 0) return null;
+
+  // Compute totalWeight from weight() calls if not set by explicit divisor
+  if (totalWeight < 0) {
+    totalWeight = terms.reduce((acc, t) => acc + t.weight, 0);
+  }
+
+  return { guards, importantTerms, terms, totalWeight };
 }
 
 /** Flatten a left-/right-associative addition tree into an ordered list. */
@@ -408,14 +504,26 @@ function isComparison(node: AstNode): boolean {
 function tryBuildTerm(rest: AstNode[]): SimpleTerm | null {
   if (rest.length === 0) return null;
 
-  const callNode = rest.find((n) => n.kind === 'call' && TF_FNS.has((n as CallNode).name));
-  if (!callNode) return null;
+  const callNodes = rest.filter((n) => n.kind === 'call' && TF_FNS.has((n as CallNode).name));
+  if (callNodes.length !== 1) return null; // exactly one TF call expected
 
+  // Separate WEIGHT() calls, bare numbers, and other nodes
+  const weightCalls = rest.filter(isWeightCall);
   const numberNodes = rest.filter((n) => n.kind === 'number');
-  // weight = product of all numeric factors; default 1
-  const weight = numberNodes.reduce((acc, n) => acc * (n as NumberNode).value, 1);
+  const otherNodes = rest.filter((n) => n !== callNodes[0] && !isWeightCall(n) && n.kind !== 'number');
 
-  const base = tryExtractTfCall(callNode as CallNode);
+  // Only TF call + weight()/number factors allowed — reject anything else
+  if (otherNodes.length !== 0) return null;
+
+  // weight = product of WEIGHT() values; bare numbers are treated as legacy
+  // weights only when no WEIGHT() call is present.
+  let weight = 1;
+  for (const wc of weightCalls) weight *= weightValue(wc as CallNode);
+  if (weightCalls.length === 0) {
+    for (const n of numberNodes) weight *= (n as NumberNode).value;
+  }
+
+  const base = tryExtractTfCall(callNodes[0] as CallNode);
   if (!base) return null;
 
   return { ...base, weight };

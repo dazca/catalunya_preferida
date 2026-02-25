@@ -65,9 +65,10 @@ export default function App() {
 
   /** Canonical formula from the current visual state — used to detect manual edits. */
   const enabledLayers = useMemo(() => layers.filter((l) => l.enabled), [layers]);
+  const layerOrder = useAppStore((s) => s.layerOrder);
   const visualRawFormula = useMemo(
-    () => visualToRawFormula(enabledLayers, configs),
-    [enabledLayers, configs],
+    () => visualToRawFormula(enabledLayers, configs, layerOrder),
+    [enabledLayers, configs, layerOrder],
   );
 
   /**

@@ -133,8 +133,8 @@ interface AppState {
   lang: Lang;
   /** User-editable composite score formula. */
   customFormula: string;
-  /** Formula editor mode: visual chips or raw expression. */
-  formulaMode: 'visual' | 'raw';
+  /** Formula editor mode: visual-short (icon+weight), visual (full params), raw. */
+  formulaMode: 'visual-short' | 'visual' | 'raw';
   /** Data integrity admin panel visibility. */
   dataIntegrityPanelOpen: boolean;
   /** Persisted integrity rules. */
@@ -143,6 +143,8 @@ interface AppState {
   integrityReport: IntegrityReport | null;
   /** Informational signature of last checked payload. */
   integrityLastSignature: string | null;
+  /** Explicit ordering of layers for visual formula rendering. */
+  layerOrder: LayerId[];
 
   /** Undo history stacks (not persisted). */
   _past: HistoryEntry[];
@@ -155,7 +157,7 @@ interface AppState {
   setView: (patch: Partial<ViewSettings>) => void;
   setCustomFormula: (formula: string) => void;
   resetCustomFormula: () => void;
-  setFormulaMode: (mode: 'visual' | 'raw') => void;
+  setFormulaMode: (mode: 'visual-short' | 'visual' | 'raw') => void;
   setDataIntegrityPanelOpen: (open: boolean) => void;
   updateIntegrityRules: (patch: Partial<IntegrityRules>) => void;
   replaceIntegrityRules: (rules: IntegrityRules) => void;
@@ -175,6 +177,7 @@ interface AppState {
   resetToDefaults: () => void;
   setLang: (lang: Lang) => void;
   toggleLang: () => void;
+  setLayerOrder: (order: LayerId[]) => void;
   /** Push current undoable state to history (called internally). */
   _pushHistory: () => void;
   undo: () => void;
@@ -195,11 +198,12 @@ export const useAppStore = create<AppState>()(
       presets: [],
       lang: 'ca' as Lang,
       customFormula: DEFAULT_CUSTOM_FORMULA,
-      formulaMode: 'visual',
+      formulaMode: 'visual-short',
       dataIntegrityPanelOpen: false,
       integrityRules: DEFAULT_INTEGRITY_RULES,
       integrityReport: null,
       integrityLastSignature: null,
+      layerOrder: DEFAULT_LAYERS.filter(l => l.enabled).map(l => l.id),
       _past: [],
       _future: [],
 
@@ -353,16 +357,18 @@ export const useAppStore = create<AppState>()(
           configs: DEFAULT_LAYER_CONFIGS,
           soloLayer: null,
           customFormula: DEFAULT_CUSTOM_FORMULA,
-          formulaMode: 'visual',
+          formulaMode: 'visual-short',
           view: DEFAULT_VIEW,
+          layerOrder: DEFAULT_LAYERS.filter(l => l.enabled).map(l => l.id),
         }),
 
       setLang: (lang) => set({ lang }),
       toggleLang: () => set((state) => ({ lang: state.lang === 'ca' ? 'en' : 'ca' })),
+      setLayerOrder: (layerOrder) => set({ layerOrder }),
     }),
     {
       name: 'better-idealista-config',
-      version: 7,
+      version: 8,
       // Persist everything except transient UI state
       partialize: (state) => ({
         layers: state.layers,
@@ -370,6 +376,7 @@ export const useAppStore = create<AppState>()(
         view: state.view,
         customFormula: state.customFormula,
         formulaMode: state.formulaMode,
+        layerOrder: state.layerOrder,
         integrityRules: state.integrityRules,
         dataIntegrityPanelOpen: state.dataIntegrityPanelOpen,
         presets: state.presets,
@@ -478,8 +485,8 @@ export const useAppStore = create<AppState>()(
           if (typeof view.maskDisqualifiedAsBlack !== 'boolean') {
             state.view = { ...DEFAULT_VIEW, ...view, maskDisqualifiedAsBlack: true };
           }
-          if (state.formulaMode !== 'raw' && state.formulaMode !== 'visual') {
-            state.formulaMode = 'visual';
+          if (state.formulaMode !== 'raw' && state.formulaMode !== 'visual' && state.formulaMode !== 'visual-short') {
+            state.formulaMode = 'visual-short';
           }
         }
 
@@ -496,7 +503,7 @@ export const useAppStore = create<AppState>()(
           // default formula, clear it and return to visual mode.
           if (typeof state.customFormula === 'string' && /[ºÂ°%]/.test(state.customFormula)) {
             state.customFormula = '';
-            state.formulaMode = 'visual';
+            state.formulaMode = 'visual-short';
           }
         }
 
@@ -533,7 +540,7 @@ export const useAppStore = create<AppState>()(
           // Clear old-format raw formulas that used RANGE
           if (typeof state.customFormula === 'string' && state.customFormula.includes('RANGE(') && !state.customFormula.includes('SIN(')) {
             state.customFormula = '';
-            state.formulaMode = 'visual';
+            state.formulaMode = 'visual-short';
           }
         }
 
@@ -544,6 +551,42 @@ export const useAppStore = create<AppState>()(
           }
           if (typeof state.dataIntegrityPanelOpen !== 'boolean') {
             state.dataIntegrityPanelOpen = false;
+          }
+        }
+
+        // ── v7 → v8: add `important` to all TFs + layerOrder ─────
+        if (version < 8) {
+          const cfgs = state.configs as Record<string, unknown> | undefined;
+          if (cfgs) {
+            const migrateTfImportant = (tf: Record<string, unknown>) => {
+              if (tf && typeof tf === 'object' && !('important' in tf)) {
+                tf.important = false;
+              }
+            };
+            const migrateLtcImportant = (ltc: Record<string, unknown> | undefined) => {
+              if (ltc?.tf) migrateTfImportant(ltc.tf as Record<string, unknown>);
+            };
+            const terrain = cfgs.terrain as Record<string, unknown> | undefined;
+            if (terrain) {
+              migrateLtcImportant(terrain.slope as Record<string, unknown>);
+              migrateLtcImportant(terrain.elevation as Record<string, unknown>);
+            }
+            const votes = cfgs.votes as { terms?: Array<{ value?: Record<string, unknown> }> } | undefined;
+            if (votes?.terms) {
+              for (const term of votes.terms) migrateLtcImportant(term.value);
+            }
+            for (const key of ['transit', 'forest', 'crime', 'healthcare', 'schools', 'internet', 'rentalPrices', 'employment', 'amenities']) {
+              migrateLtcImportant(cfgs[key] as Record<string, unknown>);
+            }
+            const aq = cfgs.airQuality as Record<string, unknown> | undefined;
+            if (aq) { migrateLtcImportant(aq.pm10 as Record<string, unknown>); migrateLtcImportant(aq.no2 as Record<string, unknown>); }
+            const cl = cfgs.climate as Record<string, unknown> | undefined;
+            if (cl) { migrateLtcImportant(cl.temperature as Record<string, unknown>); migrateLtcImportant(cl.rainfall as Record<string, unknown>); }
+          }
+          // Initialize layerOrder from enabled layers
+          if (!state.layerOrder || !Array.isArray(state.layerOrder)) {
+            const ls = state.layers as Array<{ id: string; enabled?: boolean }> | undefined;
+            state.layerOrder = ls ? ls.filter(l => l.enabled).map(l => l.id) : [];
           }
         }
 

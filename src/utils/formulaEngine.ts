@@ -142,12 +142,27 @@ const SHAPE_FN: Record<TfShape, string> = {
 export function visualToRawFormula(
   enabledLayers: LayerMeta[],
   configs: LayerConfigs,
+  layerOrder?: LayerId[],
 ): string {
+  // Respect explicit ordering if provided
+  let orderedLayers = enabledLayers;
+  if (layerOrder && layerOrder.length > 0) {
+    const layerById = new Map(enabledLayers.map(l => [l.id, l]));
+    const ordered: LayerMeta[] = [];
+    for (const id of layerOrder) {
+      const l = layerById.get(id);
+      if (l) { ordered.push(l); layerById.delete(id); }
+    }
+    // Append any enabled layers not in the order array
+    for (const l of layerById.values()) ordered.push(l);
+    orderedLayers = ordered;
+  }
   const constraints: string[] = [];
+  const importantParts: string[] = [];
   const terms: string[] = [];
   let totalWeight = 0;
 
-  for (const layer of enabledLayers) {
+  for (const layer of orderedLayers) {
     const varName = LAYER_VAR[layer.id];
     if (!varName) continue;
 
@@ -158,17 +173,6 @@ export function visualToRawFormula(
     const fn = SHAPE_FN[shape];
     const isInv = shape === 'invsin' || shape === 'invrange';
 
-    // Mandatory constraint guard
-    if (tf.mandatory) {
-      // Descending: disqualified when value >= decayEnd → guard (var < N)
-      // Ascending: disqualified when value <= plateauEnd → guard (var > M)
-      if (isInv) {
-        constraints.push(`(${varName} > ${fmtNum(tf.plateauEnd)})`);
-      } else {
-        constraints.push(`(${varName} < ${fmtNum(tf.decayEnd)})`);
-      }
-    }
-
     // Build function call: FN(var, M, N [, 1, floor])
     const args = [varName, fmtNum(tf.plateauEnd), fmtNum(tf.decayEnd)];
     if (tf.floor !== 0) {
@@ -176,20 +180,57 @@ export function visualToRawFormula(
     }
     const call = `${fn}(${args.join(', ')})`;
 
+    // Mandatory constraint guard (binary 0/1)
+    if (tf.mandatory) {
+      if (isInv) {
+        constraints.push(`(${varName} > ${fmtNum(tf.plateauEnd)})`);
+      } else {
+        constraints.push(`(${varName} < ${fmtNum(tf.decayEnd)})`);
+      }
+    }
+
+    // Important layers: TF call placed as multiplicative factor outside the sum
+    if (tf.important && !tf.mandatory) {
+      importantParts.push(call);
+      continue; // skip adding to weighted sum
+    }
+
     const w = fmtNum(layer.weight);
-    terms.push(`${w} * ${call}`);
+    terms.push(`weight(${w}) * ${call}`);
     totalWeight += layer.weight;
   }
 
-  if (terms.length === 0) return '0';
+  if (terms.length === 0 && importantParts.length === 0 && constraints.length === 0) return '0';
 
-  const sumPart = terms.length === 1 ? terms[0] : terms.join(' + ');
-  const tw = fmtNum(totalWeight);
-  const normalized = totalWeight === 1 ? sumPart : `(${sumPart}) / ${tw}`;
+  // Build the sum section (without /totalWeight — appended at end for
+  // clean AST stripping in detectSimpleStructure).
+  let result: string;
+  if (terms.length === 0) {
+    // Only important/guard layers, no sum → use 1 as base
+    result = '1';
+  } else {
+    const sumPart = terms.length === 1 ? terms[0] : terms.join(' + ');
+    // Wrap in parens when there are multiple additive terms
+    result = terms.length > 1 ? `(${sumPart})` : sumPart;
+  }
 
-  if (constraints.length === 0) return normalized;
+  // Prepend important factors
+  if (importantParts.length > 0) {
+    const impStr = importantParts.join(' * ');
+    result = terms.length === 0 ? impStr : `${impStr} * ${result}`;
+  }
 
-  return constraints.join(' * ') + ' * ' + (totalWeight === 1 ? normalized : `(${normalized})`);
+  // Prepend guard constraints
+  if (constraints.length > 0) {
+    result = constraints.join(' * ') + ' * ' + result;
+  }
+
+  // Append / weights at the very end so it's at the AST root
+  if (terms.length > 0) {
+    result += ' / weights';
+  }
+
+  return result;
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -371,6 +412,7 @@ function normalizeFormulaSource(formula: string): string {
   // Wrap bare identifiers with VAR("name") — skip reserved function names
   const reserved = new Set([
     'SIN', 'INVSIN', 'RANGE', 'INVRANGE', 'VAR', 'Math',
+    'WEIGHT', 'weight', 'weights',
     'true', 'false', 'null', 'undefined',
     // Math builtins injected via _M destructuring
     'SQRT', 'ABS', 'POW', 'MIN', 'MAX', 'LOG', 'LOG2', 'LOG10',
@@ -386,15 +428,33 @@ function normalizeFormulaSource(formula: string): string {
   return source;
 }
 
+/** Compute the `weights` sum by extracting all WEIGHT(n) calls from the source. */
+function computeWeightsFromSource(normalizedInput: string): number {
+  let total = 0;
+  const re = /\bweight\s*\(\s*([0-9]*\.?[0-9]+(?:[eE][+-]?[0-9]+)?)\s*\)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(normalizedInput)) !== null) {
+    total += parseFloat(match[1]);
+  }
+  return total || 1; // fallback to 1 to avoid division by zero
+}
+
 function getCompiledFormula(normalizedInput: string): CompiledFormulaFn {
   const key = normalizedInput;
   const cached = COMPILED_CACHE.get(key);
   if (cached) return cached;
   const normalizedSource = normalizeFormulaSource(normalizedInput);
+  const weightsValue = computeWeightsFromSource(normalizedInput);
   const mathDestructure = `const {${Object.keys(BUILTIN_MATH).join(',')}} = _M;`;
+  const preamble = [
+    mathDestructure,
+    `function WEIGHT(n) { return n; }`,
+    `var weight = WEIGHT;`,
+    `var weights = ${weightsValue};`,
+  ].join('\n');
   const compiled = new Function(
     'VAR', 'SIN', 'INVSIN', 'RANGE', 'INVRANGE', '_M',
-    `${mathDestructure}\nreturn (${normalizedSource});`,
+    `${preamble}\nreturn (${normalizedSource});`,
   ) as CompiledFormulaFn;
   COMPILED_CACHE.set(key, compiled);
   return compiled;

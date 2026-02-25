@@ -33,6 +33,8 @@ export interface TransferFunction {
   floor: number;
   /** If true, this layer is required — municipality is disqualified if score = floor. */
   mandatory: boolean;
+  /** If true, the TF value is placed as a multiplicative factor outside the sum (soft gate 0-1). */
+  important: boolean;
   /** Weight multiplier (default 1.0). Scales this layer's contribution. */
   multiplier: number;
   /**
@@ -154,7 +156,7 @@ export function defaultTf(
   shape: TfShape = 'sin',
   floor = 0,
 ): TransferFunction {
-  return { plateauEnd, decayEnd, floor, mandatory: false, multiplier: 1, shape };
+  return { plateauEnd, decayEnd, floor, mandatory: false, important: false, multiplier: 1, shape };
 }
 
 /** Default aspect preferences: slight preference for south-facing slopes. */
