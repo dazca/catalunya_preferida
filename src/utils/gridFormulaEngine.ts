@@ -201,13 +201,14 @@ export function clampGrid01(grid: Float32Array): void {
  */
 export function buildDisqualificationMask(
   variableGrids: Record<string, Float32Array>,
-  terrainGrids: { slopes: Float32Array; elevations: Float32Array } | null,
+  terrainGrids: { slopes: Float32Array; elevations: Float32Array; hasData?: Uint8Array } | null,
   enabledLayers: LayerMeta[],
   configs: LayerConfigs,
   n: number,
 ): Uint8Array {
   const mask = new Uint8Array(n);
   const scratch = acquireFloat32(n);
+  const hasData = terrainGrids?.hasData ?? null;
 
   for (const layer of enabledLayers) {
     const tf = getLayerTf(layer.id, configs);
@@ -216,11 +217,14 @@ export function buildDisqualificationMask(
     const input = getVariableInput(layer.id, variableGrids, terrainGrids);
     if (!input) continue;
 
+    const isTerrainLayer = layer.id === 'terrainSlope' || layer.id === 'terrainElevation';
     applyTfGrid(input, scratch, tf);
 
     const threshold = tf.floor + 0.001;
     for (let i = 0; i < n; i++) {
       if (scratch[i] <= threshold && !isNaN(input[i])) {
+        // Skip terrain pixels without DEM data (default-0 values)
+        if (isTerrainLayer && hasData && !hasData[i]) continue;
         mask[i] = 1;
       }
     }
@@ -377,10 +381,17 @@ export function computeVisualScoreGrid(
 
   // Apply disqualification mask
   const disqMask = buildDisqualificationMask(variableGrids, terrainGrids, enabledLayers, configs, n);
+  const hasTerrainLayer = enabledLayers.some(l =>
+    l.id === 'terrainSlope' || l.id === 'terrainElevation' || l.id === 'terrainAspect');
+  const hasDataArr = terrainGrids?.hasData ?? null;
   for (let i = 0; i < n; i++) {
     if (disqMask[i]) scores[i] = DISQUALIFIED;
     // Pixels outside all municipalities (membership = -1) → NaN sentinel
     if (membershipRaster[i] < 0) scores[i] = NaN;
+    // Pixels without DEM data when terrain layers are active → NaN (transparent)
+    if (hasTerrainLayer && hasDataArr && !hasDataArr[i] && membershipRaster[i] >= 0) {
+      scores[i] = NaN;
+    }
   }
 
   // Compute min/max for normalisation
@@ -432,10 +443,10 @@ export function scoreGridToRGBA(
     // Disqualified
     if (raw === DISQUALIFIED) {
       if (disqualifiedMask === 'black') {
-        pixels[off] = 0;
-        pixels[off + 1] = 0;
-        pixels[off + 2] = 0;
-        pixels[off + 3] = 230;
+        pixels[off] = 40;
+        pixels[off + 1] = 40;
+        pixels[off + 2] = 40;
+        pixels[off + 3] = 180;
       } else {
         pixels[off + 3] = 0;
       }

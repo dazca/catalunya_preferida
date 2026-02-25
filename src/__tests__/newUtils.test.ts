@@ -24,15 +24,16 @@ describe('scoreToRgba', () => {
     });
   });
 
-  it('score=0 produces a dark / muted colour', () => {
+  it('score=0 produces a bright red colour (RYG bad end)', () => {
     const [r, g, b] = scoreToRgba(0);
-    // Turbo at 0 is dark — all channels low
-    expect(r + g + b).toBeLessThan(200);
+    // RYG at 0 is bright red — R high, G+B low
+    expect(r).toBeGreaterThan(200);
+    expect(g + b).toBeLessThan(100);
   });
 
-  it('score=1 maps to the cool (blue) end of the palette', () => {
-    const [r, , b] = scoreToRgba(1);
-    expect(r).toBeGreaterThan(b);
+  it('score=1 maps to the green end of the palette', () => {
+    const [r, g] = scoreToRgba(1);
+    expect(g).toBeGreaterThan(r);
   });
 
   it('clamps out-of-range scores', () => {

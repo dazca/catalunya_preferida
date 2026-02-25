@@ -391,17 +391,17 @@ describe('scoreGridToRGBA', () => {
     expect(pixels[3]).toBe(0); // alpha = transparent
   });
 
-  it('makes disqualified pixels black when mask=black', () => {
+  it('makes disqualified pixels dark grey when mask=black', () => {
     const result: GridScoreResult = {
       scores: new Float32Array([DISQUALIFIED]),
       minScore: 0,
       maxScore: 1,
     };
     const pixels = scoreGridToRGBA(result, 'black');
-    expect(pixels[0]).toBe(0);
-    expect(pixels[1]).toBe(0);
-    expect(pixels[2]).toBe(0);
-    expect(pixels[3]).toBe(230);
+    expect(pixels[0]).toBe(40);
+    expect(pixels[1]).toBe(40);
+    expect(pixels[2]).toBe(40);
+    expect(pixels[3]).toBe(180);
   });
 
   it('makes disqualified pixels transparent when mask=transparent', () => {

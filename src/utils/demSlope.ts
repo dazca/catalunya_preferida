@@ -168,7 +168,8 @@ async function fetchFineTile(z: number, tx: number, ty: number): Promise<void> {
 
     const tile = new Float32Array(TILE_W * TILE_W);
     for (let i = 0; i < TILE_W * TILE_W; i++) {
-      tile[i] = -10000 + (d[i * 4] * 65536 + d[i * 4 + 1] * 256 + d[i * 4 + 2]) * 0.1;
+      const elev = -10000 + (d[i * 4] * 65536 + d[i * 4 + 1] * 256 + d[i * 4 + 2]) * 0.1;
+      tile[i] = elev < -1000 ? NaN : elev;
     }
     _fineTiles.set(key, tile);
     _fineFetching.delete(key);
@@ -193,8 +194,7 @@ function fineElevAtWorldPx(wpx: number, wpy: number, z: number): number | null {
   if (!tile) return null;
   const px = Math.max(0, Math.min(TILE_W - 1, Math.floor(wpx - tx * TILE_W)));
   const py = Math.max(0, Math.min(TILE_W - 1, Math.floor(wpy - ty * TILE_W)));
-  const v = tile[py * TILE_W + px];
-  return isNaN(v) ? 0 : v;
+  return tile[py * TILE_W + px]; // NaN stays NaN for no-data
 }
 
 /**
@@ -219,7 +219,8 @@ function bestFineZoomAt(
 /**
  * Sample elevation at offset (dpx, dpy) pixels from (wpx, wpy) using
  * the fine-tile cache at zoom z, with cross-tile boundary support.
- * Falls back to 0 when the neighbouring tile is not cached.
+ * Returns NaN when the neighbouring tile is not cached (caller must
+ * handle NaN via mirror/substitution).
  */
 function fineElevNeighbour(
   wpx: number,
@@ -228,7 +229,7 @@ function fineElevNeighbour(
   dpy: number,
   z: number,
 ): number {
-  return fineElevAtWorldPx(wpx + dpx, wpy + dpy, z) ?? 0;
+  return fineElevAtWorldPx(wpx + dpx, wpy + dpy, z) ?? NaN;
 }
 
 /* ------------------------------------------------------------------ */
@@ -268,7 +269,10 @@ async function fetchTile(
     for (let py = 0; py < TILE_W; py++) {
       for (let px = 0; px < TILE_W; px++) {
         const si = (py * TILE_W + px) * 4;
-        grid[(offY + py) * gridW + (offX + px)] = decodeElev(d[si], d[si + 1], d[si + 2]);
+        const elev = decodeElev(d[si], d[si + 1], d[si + 2]);
+        // Mark extreme no-data values as NaN (Catalonia min ≈ 0 m,
+        // -1000 is an extremely safe sentinel threshold).
+        grid[(offY + py) * gridW + (offX + px)] = elev < -1000 ? NaN : elev;
       }
     }
   } catch {
@@ -443,15 +447,16 @@ function lonLatToPx(
   return { px, py, valid: px >= 0 && px < gridW && py >= 0 && py < gridH };
 }
 
-/** Read elevation from the merged grid with clamped boundary. */
+/**
+ * Read elevation from the merged grid with clamped boundary.
+ * Returns NaN for no-data pixels so the Horn kernel can detect gaps.
+ */
 function gridElev(px: number, py: number): number {
-  if (!_elevGrid) return 0;
+  if (!_elevGrid) return NaN;
   const gridW = _tilesW * TILE_W;
   const gridH = _tilesH * TILE_W;
-  const cx = Math.max(0, Math.min(gridW - 1, px));
-  const cy = Math.max(0, Math.min(gridH - 1, py));
-  const v = _elevGrid[cy * gridW + cx];
-  return isNaN(v) ? 0 : v;
+  if (px < 0 || px >= gridW || py < 0 || py >= gridH) return NaN;
+  return _elevGrid[py * gridW + px]; // NaN stays NaN
 }
 
 /**
@@ -464,13 +469,14 @@ export function getElevationAt(lon: number, lat: number): number | null {
   const fine = bestFineZoomAt(lon, lat);
   if (fine) {
     const v = fineElevAtWorldPx(fine.wpx, fine.wpy, fine.z);
-    if (v !== null) return v;
+    if (v !== null && !isNaN(v)) return v;
   }
   // Fall back to Z=9 global grid
   if (!isDemLoaded()) return null;
   const { px, py, valid } = lonLatToPx(lon, lat);
   if (!valid) return null;
-  return gridElev(px, py);
+  const ev = gridElev(px, py);
+  return isNaN(ev) ? null : ev;
 }
 
 /**
@@ -486,14 +492,18 @@ export function getElevationAt(lon: number, lat: number): number | null {
  * Mercator latitude distortion.
  */
 export function getSlopeAt(lon: number, lat: number): number | null {
+  const cosLat = Math.cos(lat * (Math.PI / 180));
+
   // --- Try fine-tile Horn kernel first ---
   const fine = bestFineZoomAt(lon, lat);
   if (fine) {
     const { z, wpx, wpy } = fine;
     const degPerFinePx = 360 / ((1 << z) * TILE_W);
-    const fCellW = degPerFinePx * 111_320 * Math.cos(lat * (Math.PI / 180));
-    const fCellH = degPerFinePx * 110_540;
+    const fCellW = degPerFinePx * 111_320 * cosLat;
+    const fCellH = degPerFinePx * 110_540 * cosLat;
 
+    const fe = fineElevAtWorldPx(wpx, wpy, z);
+    if (fe === null || isNaN(fe)) return null;
     const fa = fineElevNeighbour(wpx, wpy, -1, -1, z);
     const fb = fineElevNeighbour(wpx, wpy,  0, -1, z);
     const fc = fineElevNeighbour(wpx, wpy,  1, -1, z);
@@ -503,8 +513,18 @@ export function getSlopeAt(lon: number, lat: number): number | null {
     const fh = fineElevNeighbour(wpx, wpy,  0,  1, z);
     const fi = fineElevNeighbour(wpx, wpy,  1,  1, z);
 
-    const dzdx = ((fc + 2 * ff + fi) - (fa + 2 * fd + fg)) / (8 * fCellW);
-    const dzdy = ((fg + 2 * fh + fi) - (fa + 2 * fb + fc)) / (8 * fCellH);
+    // NaN-safe: substitute centre elevation for missing neighbours
+    const sa = isNaN(fa) ? fe : fa;
+    const sb = isNaN(fb) ? fe : fb;
+    const sc = isNaN(fc) ? fe : fc;
+    const sd = isNaN(fd) ? fe : fd;
+    const sf = isNaN(ff) ? fe : ff;
+    const sg = isNaN(fg) ? fe : fg;
+    const sh = isNaN(fh) ? fe : fh;
+    const si = isNaN(fi) ? fe : fi;
+
+    const dzdx = ((sc + 2 * sf + si) - (sa + 2 * sd + sg)) / (8 * fCellW);
+    const dzdy = ((sg + 2 * sh + si) - (sa + 2 * sb + sc)) / (8 * fCellH);
     return Math.atan(Math.sqrt(dzdx * dzdx + dzdy * dzdy)) * (180 / Math.PI);
   }
 
@@ -514,9 +534,11 @@ export function getSlopeAt(lon: number, lat: number): number | null {
   if (!valid) return null;
 
   const degPerPx = 360 / ((1 << ZOOM) * TILE_W);
-  const cellW = degPerPx * 111_320 * Math.cos(lat * (Math.PI / 180));
-  const cellH = degPerPx * 110_540;
+  const cellW = degPerPx * 111_320 * cosLat;
+  const cellH = degPerPx * 110_540 * cosLat;
 
+  const ev = gridElev(px, py);
+  if (isNaN(ev)) return null;
   const a = gridElev(px - 1, py - 1);
   const b = gridElev(px,     py - 1);
   const c = gridElev(px + 1, py - 1);
@@ -526,8 +548,18 @@ export function getSlopeAt(lon: number, lat: number): number | null {
   const h = gridElev(px,     py + 1);
   const i = gridElev(px + 1, py + 1);
 
-  const dzdx = ((c + 2 * f + i) - (a + 2 * d + g)) / (8 * cellW);
-  const dzdy = ((g + 2 * h + i) - (a + 2 * b + c)) / (8 * cellH);
+  // NaN-safe: substitute centre elevation for missing neighbours
+  const sa = isNaN(a) ? ev : a;
+  const sb = isNaN(b) ? ev : b;
+  const sc = isNaN(c) ? ev : c;
+  const sd = isNaN(d) ? ev : d;
+  const sf = isNaN(f) ? ev : f;
+  const sg = isNaN(g) ? ev : g;
+  const sh = isNaN(h) ? ev : h;
+  const si = isNaN(i) ? ev : i;
+
+  const dzdx = ((sc + 2 * sf + si) - (sa + 2 * sd + sg)) / (8 * cellW);
+  const dzdy = ((sg + 2 * sh + si) - (sa + 2 * sb + sc)) / (8 * cellH);
   return Math.atan(Math.sqrt(dzdx * dzdx + dzdy * dzdy)) * (180 / Math.PI);
 }
 
@@ -539,15 +571,18 @@ export function getSlopeAt(lon: number, lat: number): number | null {
  */
 export function getAspectAt(lon: number, lat: number): string | null {
   let dzdx: number, dzdy: number;
+  const cosLat = Math.cos(lat * (Math.PI / 180));
 
   // --- Try fine-tile Horn kernel first ---
   const fine = bestFineZoomAt(lon, lat);
   if (fine) {
     const { z, wpx, wpy } = fine;
     const degPerFinePx = 360 / ((1 << z) * TILE_W);
-    const fCellW = degPerFinePx * 111_320 * Math.cos(lat * (Math.PI / 180));
-    const fCellH = degPerFinePx * 110_540;
+    const fCellW = degPerFinePx * 111_320 * cosLat;
+    const fCellH = degPerFinePx * 110_540 * cosLat;
 
+    const fe = fineElevAtWorldPx(wpx, wpy, z);
+    if (fe === null || isNaN(fe)) return null;
     const fa = fineElevNeighbour(wpx, wpy, -1, -1, z);
     const fb = fineElevNeighbour(wpx, wpy,  0, -1, z);
     const fc = fineElevNeighbour(wpx, wpy,  1, -1, z);
@@ -557,8 +592,17 @@ export function getAspectAt(lon: number, lat: number): string | null {
     const fh = fineElevNeighbour(wpx, wpy,  0,  1, z);
     const fi = fineElevNeighbour(wpx, wpy,  1,  1, z);
 
-    dzdx = ((fc + 2 * ff + fi) - (fa + 2 * fd + fg)) / (8 * fCellW);
-    dzdy = ((fg + 2 * fh + fi) - (fa + 2 * fb + fc)) / (8 * fCellH);
+    const sa = isNaN(fa) ? fe : fa;
+    const sb = isNaN(fb) ? fe : fb;
+    const sc = isNaN(fc) ? fe : fc;
+    const sd = isNaN(fd) ? fe : fd;
+    const sf = isNaN(ff) ? fe : ff;
+    const sg = isNaN(fg) ? fe : fg;
+    const sh = isNaN(fh) ? fe : fh;
+    const si = isNaN(fi) ? fe : fi;
+
+    dzdx = ((sc + 2 * sf + si) - (sa + 2 * sd + sg)) / (8 * fCellW);
+    dzdy = ((sg + 2 * sh + si) - (sa + 2 * sb + sc)) / (8 * fCellH);
   } else {
     // --- Fall back to Z=9 global grid ---
     if (!isDemLoaded()) return null;
@@ -566,9 +610,11 @@ export function getAspectAt(lon: number, lat: number): string | null {
     if (!valid) return null;
 
     const degPerPx = 360 / ((1 << ZOOM) * TILE_W);
-    const cellW = degPerPx * 111_320 * Math.cos(lat * (Math.PI / 180));
-    const cellH = degPerPx * 110_540;
+    const cellW = degPerPx * 111_320 * cosLat;
+    const cellH = degPerPx * 110_540 * cosLat;
 
+    const ev = gridElev(px, py);
+    if (isNaN(ev)) return null;
     const a = gridElev(px - 1, py - 1);
     const b = gridElev(px,     py - 1);
     const c = gridElev(px + 1, py - 1);
@@ -578,8 +624,17 @@ export function getAspectAt(lon: number, lat: number): string | null {
     const h = gridElev(px,     py + 1);
     const i = gridElev(px + 1, py + 1);
 
-    dzdx = ((c + 2 * f + i) - (a + 2 * d + g)) / (8 * cellW);
-    dzdy = ((g + 2 * h + i) - (a + 2 * b + c)) / (8 * cellH);
+    const sa = isNaN(a) ? ev : a;
+    const sb = isNaN(b) ? ev : b;
+    const sc = isNaN(c) ? ev : c;
+    const sd = isNaN(d) ? ev : d;
+    const sf = isNaN(f) ? ev : f;
+    const sg = isNaN(g) ? ev : g;
+    const sh = isNaN(h) ? ev : h;
+    const si = isNaN(i) ? ev : i;
+
+    dzdx = ((sc + 2 * sf + si) - (sa + 2 * sd + sg)) / (8 * cellW);
+    dzdy = ((sg + 2 * sh + si) - (sa + 2 * sb + sc)) / (8 * cellH);
   }
 
   let deg = Math.atan2(dzdx, -dzdy) * (180 / Math.PI);
@@ -642,7 +697,6 @@ export function sampleDemViewport(
   /* ── Precompute Z=9 integer pixel coords (one trig call per row) ── */
   const z9Scale = (1 << ZOOM) * TILE_W;
   const z9DegPx = 360 / z9Scale;
-  const z9CellH = z9DegPx * 110_540;
 
   const z9ColPx = new Int32Array(cols);
   for (let c = 0; c < cols; c++) {
@@ -651,11 +705,14 @@ export function sampleDemViewport(
   }
   const z9RowPy = new Int32Array(rows);
   const z9RowCW = new Float32Array(rows); // cell width metres per row
+  const z9RowCH = new Float32Array(rows); // cell height metres per row
   for (let r = 0; r < rows; r++) {
     const lat = n - (r + 0.5) * dy;
     const rad = lat * (Math.PI / 180);
+    const cosR = Math.cos(rad);
     z9RowPy[r] = Math.floor(((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * z9Scale - _ty0 * TILE_W);
-    z9RowCW[r] = z9DegPx * 111_320 * Math.cos(rad);
+    z9RowCW[r] = z9DegPx * 111_320 * cosR;
+    z9RowCH[r] = z9DegPx * 110_540 * cosR;
   }
   const gridW9 = _tilesW * TILE_W;
   const gridH9 = _tilesH * TILE_W;
@@ -677,14 +734,14 @@ export function sampleDemViewport(
   let fColLx:  Uint8Array   | null = null;
   let fRowLy:  Uint8Array   | null = null;
   let fRowCW:  Float32Array | null = null;
-  let fCellH  = 0;
+  let fRowCH:  Float32Array | null = null;
   const fTileMap = new Map<number, Float32Array>(); // numeric-key tile index
 
   if (fz > 0) {
     const fScale = (1 << fz) * TILE_W;
     const fDegPx = 360 / fScale;
-    fCellH = fDegPx * 110_540;
     fRowCW = new Float32Array(rows);
+    fRowCH = new Float32Array(rows);
 
     fColWpx = new Float32Array(cols);
     fColTx  = new Int32Array(cols);
@@ -703,13 +760,13 @@ export function sampleDemViewport(
     for (let r = 0; r < rows; r++) {
       const lat = n - (r + 0.5) * dy;
       const rad = lat * (Math.PI / 180);
+      const cosR = Math.cos(rad);
       const wpy = ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * fScale;
       fRowWpy[r] = wpy;
       fRowTy[r]  = Math.floor(wpy / TILE_W);
       fRowLy[r]  = Math.floor(wpy - fRowTy[r] * TILE_W);
-      fRowCW![r] = fDegPx * 111_320 * Math.cos(rad * 1); // rad already in radians above
-      // recalc with correct lat
-      fRowCW![r] = fDegPx * 111_320 * Math.cos(lat * (Math.PI / 180));
+      fRowCW![r] = fDegPx * 111_320 * cosR;
+      fRowCH![r] = fDegPx * 110_540 * cosR;
     }
 
     // Pre-index tiles covering the viewport
@@ -736,12 +793,14 @@ export function sampleDemViewport(
   for (let r = 0; r < rows; r++) {
     const py9 = z9RowPy[r];
     const cw9 = z9RowCW[r];
+    const ch9 = z9RowCH[r];
 
     // Fine-tile row data
     const fty    = fz > 0 ? fRowTy![r]  : 0;
     const fly    = fz > 0 ? fRowLy![r]  : 0;
     const fwpy   = fz > 0 ? fRowWpy![r] : 0;
     const fCellW = fz > 0 ? fRowCW![r]  : 0;
+    const fCellH = fz > 0 ? fRowCH![r]  : 0;
 
     for (let c = 0; c < cols; c++) {
       const idx = r * cols + c;
@@ -766,16 +825,23 @@ export function sampleDemViewport(
             g  = tile[base + TILE_W - 1]; h  = tile[base + TILE_W]; iv = tile[base + TILE_W + 1];
           } else {
             /* ── Slow path: cross-tile boundary ── */
-            a  = fineElevAtWorldPx(fwpx - 1, fwpy - 1, fz) ?? 0;
-            b  = fineElevAtWorldPx(fwpx,     fwpy - 1, fz) ?? 0;
-            cv = fineElevAtWorldPx(fwpx + 1, fwpy - 1, fz) ?? 0;
-            d  = fineElevAtWorldPx(fwpx - 1, fwpy,     fz) ?? 0;
+            a  = fineElevAtWorldPx(fwpx - 1, fwpy - 1, fz) ?? NaN;
+            b  = fineElevAtWorldPx(fwpx,     fwpy - 1, fz) ?? NaN;
+            cv = fineElevAtWorldPx(fwpx + 1, fwpy - 1, fz) ?? NaN;
+            d  = fineElevAtWorldPx(fwpx - 1, fwpy,     fz) ?? NaN;
             ev = tile[fly * TILE_W + flx]; // centre always in tile
-            fv = fineElevAtWorldPx(fwpx + 1, fwpy,     fz) ?? 0;
-            g  = fineElevAtWorldPx(fwpx - 1, fwpy + 1, fz) ?? 0;
-            h  = fineElevAtWorldPx(fwpx,     fwpy + 1, fz) ?? 0;
-            iv = fineElevAtWorldPx(fwpx + 1, fwpy + 1, fz) ?? 0;
+            fv = fineElevAtWorldPx(fwpx + 1, fwpy,     fz) ?? NaN;
+            g  = fineElevAtWorldPx(fwpx - 1, fwpy + 1, fz) ?? NaN;
+            h  = fineElevAtWorldPx(fwpx,     fwpy + 1, fz) ?? NaN;
+            iv = fineElevAtWorldPx(fwpx + 1, fwpy + 1, fz) ?? NaN;
           }
+
+          // Skip pixel if centre is no-data
+          if (isNaN(ev)) continue;
+          // NaN-safe: substitute centre elevation for missing neighbours
+          if (isNaN(a))  a  = ev;  if (isNaN(b))  b  = ev;  if (isNaN(cv)) cv = ev;
+          if (isNaN(d))  d  = ev;  if (isNaN(fv)) fv = ev;
+          if (isNaN(g))  g  = ev;  if (isNaN(h))  h  = ev;  if (isNaN(iv)) iv = ev;
 
           const dzdx = ((cv + 2*fv + iv) - (a + 2*d + g)) / (8 * fCellW);
           const dzdy = ((g  + 2*h  + iv) - (a + 2*b + cv)) / (8 * fCellH);
@@ -793,18 +859,25 @@ export function sampleDemViewport(
       const px9 = z9ColPx[c];
       if (px9 < 0 || px9 >= gridW9 || py9 < 0 || py9 >= gridH9) continue;
 
-      const a  = gridElev(px9 - 1, py9 - 1);
-      const b  = gridElev(px9,     py9 - 1);
-      const cv = gridElev(px9 + 1, py9 - 1);
-      const d  = gridElev(px9 - 1, py9);
-      const ev = gridElev(px9,     py9);
-      const fv = gridElev(px9 + 1, py9);
-      const g  = gridElev(px9 - 1, py9 + 1);
-      const h  = gridElev(px9,     py9 + 1);
-      const iv = gridElev(px9 + 1, py9 + 1);
+      const ev = gridElev(px9, py9);
+      if (isNaN(ev)) continue; // no-data → leave as 0 (transparent)
+
+      let a  = gridElev(px9 - 1, py9 - 1);
+      let b  = gridElev(px9,     py9 - 1);
+      let cv = gridElev(px9 + 1, py9 - 1);
+      let d  = gridElev(px9 - 1, py9);
+      let fv = gridElev(px9 + 1, py9);
+      let g  = gridElev(px9 - 1, py9 + 1);
+      let h  = gridElev(px9,     py9 + 1);
+      let iv = gridElev(px9 + 1, py9 + 1);
+
+      // NaN-safe: substitute centre elevation for missing neighbours
+      if (isNaN(a))  a  = ev;  if (isNaN(b))  b  = ev;  if (isNaN(cv)) cv = ev;
+      if (isNaN(d))  d  = ev;  if (isNaN(fv)) fv = ev;
+      if (isNaN(g))  g  = ev;  if (isNaN(h))  h  = ev;  if (isNaN(iv)) iv = ev;
 
       const dzdx = ((cv + 2*fv + iv) - (a + 2*d + g)) / (8 * cw9);
-      const dzdy = ((g  + 2*h  + iv) - (a + 2*b + cv)) / (8 * z9CellH);
+      const dzdy = ((g  + 2*h  + iv) - (a + 2*b + cv)) / (8 * ch9);
       slopes[idx]     = Math.atan(Math.sqrt(dzdx*dzdx + dzdy*dzdy)) * (180 / Math.PI);
       elevations[idx] = ev;
       let deg = Math.atan2(dzdx, -dzdy) * (180 / Math.PI);

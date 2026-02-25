@@ -395,10 +395,10 @@ export function renderHeatmapImage(
 
     if (raw === DISQUALIFIED_MASK_SCORE) {
       if (disqualifiedMask === 'black') {
-        pixels[off] = 0;
-        pixels[off + 1] = 0;
-        pixels[off + 2] = 0;
-        pixels[off + 3] = 230;
+        pixels[off] = 40;
+        pixels[off + 1] = 40;
+        pixels[off + 2] = 40;
+        pixels[off + 3] = 180;
       } else {
         pixels[off + 3] = 0;
       }
