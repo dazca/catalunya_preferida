@@ -9,7 +9,7 @@ import AboutTab from './tabs/AboutTab';
 import './admin.css';
 
 /* ── Lightweight auth ─────────────────────────────────────────────── */
-const PASS_HASH = '7a6e1d3b';
+const PASS_HASH = 'c9cb506b';
 
 function simpleHash(s: string): string {
   let h = 0;
