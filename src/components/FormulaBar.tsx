@@ -760,7 +760,7 @@ function ViewMenuDropdown({ anchorRef }: { anchorRef: React.RefObject<HTMLDivEle
    FormulaBar – root component
    ═══════════════════════════════════════════════════════════════════════ */
 
-export default function FormulaBar({ onOpenIntegrityPanel }: { onOpenIntegrityPanel?: () => void }) {
+export default function FormulaBar() {
   const {
     layers,
     configs,
@@ -1133,14 +1133,6 @@ export default function FormulaBar({ onOpenIntegrityPanel }: { onOpenIntegrityPa
             </button>
             {viewOpen && <ViewMenuDropdown anchorRef={viewWrapRef} />}
           </div>
-
-          <button
-            className="fb-admin-btn"
-            onClick={() => onOpenIntegrityPanel?.()}
-            title="Open data integrity admin panel"
-          >
-            Admin
-          </button>
 
           {/* Lang toggle */}
           <button className="fb-lang-btn" onClick={toggleLang} title="Toggle language">

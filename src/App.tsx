@@ -7,7 +7,7 @@ import MapContainer from './components/MapContainer';
 import MunicipalityInfo from './components/MunicipalityInfo';
 import PointAnalysisPanel from './components/PointAnalysisPanel';
 import FormulaBar from './components/FormulaBar';
-import DataIntegrityPanel from './components/DataIntegrityPanel';
+
 import { useAppStore } from './store';
 import { useT } from './i18n';
 import { useResourceData } from './hooks/useResourceData';
@@ -34,7 +34,6 @@ export default function App() {
     soloLayer,
     undo,
     redo,
-    setDataIntegrityPanelOpen,
   } = useAppStore();
   const t = useT();
   const {
@@ -42,10 +41,6 @@ export default function App() {
     municipalityData,
     facilityPoints,
     climateStations,
-    transitStops,
-    healthFacilities,
-    schools,
-    amenities,
     loading,
     error,
   } = useResourceData();
@@ -332,15 +327,7 @@ export default function App() {
       />
       <MunicipalityInfo scores={scores} municipalityNames={municipalityNames} />
       <PointAnalysisPanel result={pointScore} />
-      <FormulaBar onOpenIntegrityPanel={() => setDataIntegrityPanelOpen(true)} />
-      <DataIntegrityPanel
-        municipalities={municipalities}
-        municipalityData={municipalityData}
-        transitStops={transitStops}
-        healthFacilities={healthFacilities}
-        schools={schools}
-        amenities={amenities}
-      />
+      <FormulaBar />
     </div>
   );
 }
