@@ -163,7 +163,20 @@ h1.adm-title { font-size: 1.2em; color: var(--adm-text); margin-bottom: 4px; fon
 }
 .adm-leg-bar { width: 140px; height: 10px; border-radius: 3px; }
 .adm-leg-elev { background: linear-gradient(to right, #1a1a2e, #e0e0e0); }
-.adm-leg-aspect { background: linear-gradient(to right, #d63031, #fdcb6e 25%, #00b894 50%, #fdcb6e 75%, #d63031); }
+.adm-leg-aspect { background: linear-gradient(to right,
+  hsl(0,80%,50%),
+  hsl(30,80%,50%),
+  hsl(60,80%,50%),
+  hsl(90,80%,50%),
+  hsl(120,80%,50%),
+  hsl(150,80%,50%),
+  hsl(180,80%,50%),
+  hsl(210,80%,50%),
+  hsl(240,80%,50%),
+  hsl(270,80%,50%),
+  hsl(300,80%,50%),
+  hsl(330,80%,50%),
+  hsl(360,80%,50%)); }
 .adm-leg-suit { background: linear-gradient(to right, #d63031, #fdcb6e, #00b894); }
 
 /* ── Assertions box ────────────────────────────────────────────────── */

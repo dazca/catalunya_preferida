@@ -240,15 +240,24 @@ export function buildDisqualificationMask(
 /**
  * Score aspect values (0-255 encoded angles) through wind-rose preferences
  * with smooth cosine interpolation between adjacent directions.
+ * aspectWeight dampens the score's deviation from neutral (0.5).
  */
 export function scoreAspectGrid(
   aspects: Uint8Array,
   prefs: AspectPreferences,
   out: Float32Array,
+  aspectWeight = 1,
 ): void {
   const lut = buildAspectScoreLut(prefs);
-  for (let i = 0; i < aspects.length; i++) {
-    out[i] = lut[aspects[i]];
+  if (Math.abs(aspectWeight - 1) < 1e-9) {
+    // Fast path: no dampening
+    for (let i = 0; i < aspects.length; i++) {
+      out[i] = lut[aspects[i]];
+    }
+  } else {
+    for (let i = 0; i < aspects.length; i++) {
+      out[i] = 0.5 + (lut[aspects[i]] - 0.5) * aspectWeight;
+    }
   }
 }
 
@@ -341,7 +350,7 @@ export function computeVisualScoreGrid(
 
     if (layer.id === 'terrainAspect' && terrainGrids) {
       // Aspect uses wind-rose scoring, not a TF
-      scoreAspectGrid(terrainGrids.aspects, configs.terrain.aspect, scratch);
+      scoreAspectGrid(terrainGrids.aspects, configs.terrain.aspect, scratch, configs.terrain.aspectWeight ?? 1);
       for (let i = 0; i < n; i++) {
         weightedSum[i] += scratch[i] * layer.weight;
       }

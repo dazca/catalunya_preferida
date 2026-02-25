@@ -15,6 +15,9 @@
 const ZOOM = 9;
 const TILE_W = 256; // pixels per tile edge
 
+/** Gradient magnitude below this threshold = effectively flat terrain. */
+const FLAT_GRAD_THRESHOLD = 1e-6;
+
 /* Catalonia bounding box */
 const CAT_W = 0.16;
 const CAT_S = 40.52;
@@ -639,6 +642,9 @@ export function getAspectAt(lon: number, lat: number): string | null {
 
   // Downhill bearing: atan2(east, north) with gradient negated
   // In pixel coords: +px = east, +py = south, so north = -dzdy
+  const grad = dzdx * dzdx + dzdy * dzdy;
+  if (grad < FLAT_GRAD_THRESHOLD) return 'FLAT';
+
   let deg = Math.atan2(-dzdx, dzdy) * (180 / Math.PI);
   if (deg < 0) deg += 360;
 
@@ -652,6 +658,62 @@ export function getAspectAt(lon: number, lat: number): string | null {
   return 'NW';
 }
 
+/**
+ * Get aspect angle in degrees at a specific coordinate.
+ * Returns -1 for flat terrain (no meaningful aspect), null if no DEM data.
+ */
+export function getAspectAngleAt(lon: number, lat: number): number | null {
+  let dzdx: number, dzdy: number;
+  const cosLat = Math.cos(lat * (Math.PI / 180));
+
+  const fine = bestFineZoomAt(lon, lat);
+  if (fine) {
+    const { z, wpx, wpy } = fine;
+    const degPerFinePx = 360 / ((1 << z) * TILE_W);
+    const fCellW = degPerFinePx * 111_320 * cosLat;
+    const fCellH = degPerFinePx * 110_540 * cosLat;
+    const fe = fineElevAtWorldPx(wpx, wpy, z);
+    if (fe === null || isNaN(fe)) return null;
+    const sa = fineElevNeighbour(wpx, wpy, -1, -1, z); const sb = fineElevNeighbour(wpx, wpy,  0, -1, z);
+    const sc = fineElevNeighbour(wpx, wpy,  1, -1, z); const sd = fineElevNeighbour(wpx, wpy, -1,  0, z);
+    const sf = fineElevNeighbour(wpx, wpy,  1,  0, z); const sg = fineElevNeighbour(wpx, wpy, -1,  1, z);
+    const sh = fineElevNeighbour(wpx, wpy,  0,  1, z); const si = fineElevNeighbour(wpx, wpy,  1,  1, z);
+    const a = isNaN(sa) ? fe : sa; const b = isNaN(sb) ? fe : sb;
+    const c = isNaN(sc) ? fe : sc; const d = isNaN(sd) ? fe : sd;
+    const f = isNaN(sf) ? fe : sf; const g = isNaN(sg) ? fe : sg;
+    const h = isNaN(sh) ? fe : sh; const i = isNaN(si) ? fe : si;
+    dzdx = ((c + 2*f + i) - (a + 2*d + g)) / (8 * fCellW);
+    dzdy = ((g + 2*h + i) - (a + 2*b + c)) / (8 * fCellH);
+  } else {
+    if (!isDemLoaded()) return null;
+    const { px, py, valid } = lonLatToPx(lon, lat);
+    if (!valid) return null;
+    const degPerPx = 360 / ((1 << ZOOM) * TILE_W);
+    const cellW = degPerPx * 111_320 * cosLat;
+    const cellH = degPerPx * 110_540 * cosLat;
+    const ev = gridElev(px, py);
+    if (isNaN(ev)) return null;
+    const a = nanSafe(gridElev(px-1,py-1), ev); const b = nanSafe(gridElev(px,py-1), ev);
+    const c = nanSafe(gridElev(px+1,py-1), ev); const d = nanSafe(gridElev(px-1,py), ev);
+    const f = nanSafe(gridElev(px+1,py), ev);   const g = nanSafe(gridElev(px-1,py+1), ev);
+    const h = nanSafe(gridElev(px,py+1), ev);   const i = nanSafe(gridElev(px+1,py+1), ev);
+    dzdx = ((c + 2*f + i) - (a + 2*d + g)) / (8 * cellW);
+    dzdy = ((g + 2*h + i) - (a + 2*b + c)) / (8 * cellH);
+  }
+
+  const grad = dzdx * dzdx + dzdy * dzdy;
+  if (grad < FLAT_GRAD_THRESHOLD) return -1; // flat sentinel
+
+  let deg = Math.atan2(-dzdx, dzdy) * (180 / Math.PI);
+  if (deg < 0) deg += 360;
+  return deg;
+}
+
+/** NaN-safe helper: return val if finite, otherwise fallback. */
+function nanSafe(val: number, fallback: number): number {
+  return isNaN(val) ? fallback : val;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Viewport batch sampler                                            */
 /* ------------------------------------------------------------------ */
@@ -661,10 +723,13 @@ export const DEM_ASPECT_LABELS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as
 
 /**
  * Convert a 0-255 aspect code to one of the 8 cardinal/intercardinal labels.
- * Code 0 = N (0°), 32 = NE (45°), 64 = E (90°), … 224 = NW (315°).
+ * Code 255 = flat terrain sentinel → returns 'FLAT'.
+ * Otherwise: 0 = N (0°), 32 ≈ NE (45°), 64 ≈ E (90°), … 224 ≈ NW (315°).
  */
 export function aspectCodeToLabel(code: number): string {
-  const idx = Math.round((code & 0xFF) / 32) % 8;
+  if (code === 255) return 'FLAT';
+  const deg = (code & 0xFF) * 360 / 255;
+  const idx = Math.round(deg / 45) % 8;
   return DEM_ASPECT_LABELS[idx];
 }
 
@@ -856,11 +921,16 @@ export function sampleDemViewport(
 
           const dzdx = ((cv + 2*fv + iv) - (a + 2*d + g)) / (8 * fCellW);
           const dzdy = ((g  + 2*h  + iv) - (a + 2*b + cv)) / (8 * fCellH);
-          slopes[idx]     = Math.atan(Math.sqrt(dzdx*dzdx + dzdy*dzdy)) * (180 / Math.PI);
+          const grad = dzdx*dzdx + dzdy*dzdy;
+          slopes[idx]     = Math.atan(Math.sqrt(grad)) * (180 / Math.PI);
           elevations[idx] = ev;
-          let deg = Math.atan2(-dzdx, dzdy) * (180 / Math.PI);
-          if (deg < 0) deg += 360;
-          aspects[idx] = Math.round(deg * 256 / 360) & 0xFF;
+          if (grad < FLAT_GRAD_THRESHOLD) {
+            aspects[idx] = 255; // flat sentinel
+          } else {
+            let deg = Math.atan2(-dzdx, dzdy) * (180 / Math.PI);
+            if (deg < 0) deg += 360;
+            aspects[idx] = Math.min(254, Math.round(deg * 255 / 360));
+          }
           hasData[idx] = 1;
           continue;
         }
@@ -889,11 +959,16 @@ export function sampleDemViewport(
 
       const dzdx = ((cv + 2*fv + iv) - (a + 2*d + g)) / (8 * cw9);
       const dzdy = ((g  + 2*h  + iv) - (a + 2*b + cv)) / (8 * ch9);
-      slopes[idx]     = Math.atan(Math.sqrt(dzdx*dzdx + dzdy*dzdy)) * (180 / Math.PI);
+      const grad = dzdx*dzdx + dzdy*dzdy;
+      slopes[idx]     = Math.atan(Math.sqrt(grad)) * (180 / Math.PI);
       elevations[idx] = ev;
-      let deg = Math.atan2(-dzdx, dzdy) * (180 / Math.PI);
-      if (deg < 0) deg += 360;
-      aspects[idx] = Math.round(deg * 256 / 360) & 0xFF;
+      if (grad < FLAT_GRAD_THRESHOLD) {
+        aspects[idx] = 255; // flat sentinel
+      } else {
+        let deg = Math.atan2(-dzdx, dzdy) * (180 / Math.PI);
+        if (deg < 0) deg += 360;
+        aspects[idx] = Math.min(254, Math.round(deg * 255 / 360));
+      }
       hasData[idx] = 1;
     }
   }

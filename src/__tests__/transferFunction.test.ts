@@ -8,6 +8,7 @@ import {
   scoreAspect,
   scoreAspectAngle,
   buildAspectScoreLut,
+  ASPECT_FLAT,
 } from '../utils/transferFunction';
 import type { TransferFunction, AspectPreferences } from '../types/transferFunction';
 
@@ -188,8 +189,9 @@ describe('scoreAspectAngle (smooth interpolation)', () => {
     expect(score350).toBeLessThan(Math.max(prefs.NW, prefs.N) + 0.01);
   });
 
-  it('negative angles are normalised', () => {
-    expect(scoreAspectAngle(-90, prefs)).toBeCloseTo(scoreAspectAngle(270, prefs), 5);
+  it('negative angles return 0.5 (flat sentinel)', () => {
+    expect(scoreAspectAngle(-90, prefs)).toBeCloseTo(0.5, 5);
+    expect(scoreAspectAngle(-1, prefs)).toBeCloseTo(0.5, 5);
   });
 });
 
@@ -217,5 +219,17 @@ describe('buildAspectScoreLut', () => {
       expect(lut[i]).toBeGreaterThanOrEqual(0);
       expect(lut[i]).toBeLessThanOrEqual(1);
     }
+  });
+
+  it('flat sentinel entry (255) is 0.5 neutral', () => {
+    const lut = buildAspectScoreLut(prefs);
+    expect(lut[ASPECT_FLAT]).toBe(0.5);
+    expect(lut[255]).toBe(0.5);
+  });
+});
+
+describe('ASPECT_FLAT constant', () => {
+  it('equals 255', () => {
+    expect(ASPECT_FLAT).toBe(255);
   });
 });

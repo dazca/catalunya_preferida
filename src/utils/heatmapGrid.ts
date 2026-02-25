@@ -337,6 +337,8 @@ export function renderHeatmapImage(
             const vals = featureNormValues[fi];
             vals.slope = vals.terrainslope = demSamples.slopes[idx];
             vals.elevation = vals.terrainelevation = demSamples.elevations[idx];
+            const ac = demSamples.aspects[idx];
+            vals.aspect = vals.terrainaspect = ac === 255 ? -1 : ac * 360 / 255;
             cellScores[idx] = compiledFormula(vals);
           }
         } else if (nonTerrainByFeature) {
@@ -344,7 +346,7 @@ export function renderHeatmapImage(
           const t  = evaluateTerrainPixels(
             demSamples.slopes[idx],
             demSamples.elevations[idx],
-            demSamples.aspects[idx] * 360 / 256,
+            demSamples.aspects[idx] === 255 ? -1 : demSamples.aspects[idx] * 360 / 255,
             terrainSubLayers,
             configs,
           );

@@ -542,14 +542,18 @@ export function evaluateTerrainPixels(
       case 'terrainElevation':
         result = combineSubScores([scoreSingleTf(elevationM, configs.terrain.elevation)]);
         break;
-      case 'terrainAspect':
+      case 'terrainAspect': {
+        const rawAspect = typeof aspect === 'number'
+          ? scoreAspectAngle(aspect, configs.terrain.aspect)
+          : scoreAspect(aspect, configs.terrain.aspect);
+        // aspectWeight dampens the score's deviation from neutral (0.5)
+        const aw = configs.terrain.aspectWeight ?? 1;
         result = {
-          score: typeof aspect === 'number'
-            ? scoreAspectAngle(aspect, configs.terrain.aspect)
-            : scoreAspect(aspect, configs.terrain.aspect),
+          score: 0.5 + (rawAspect - 0.5) * aw,
           disqualified: false,
         };
         break;
+      }
     }
     if (!result) continue;
     weightedSum += result.score * layer.weight;

@@ -11,6 +11,13 @@
 import type { TransferFunction, DataStats, AspectPreferences } from '../types/transferFunction';
 
 /**
+ * Sentinel value in Uint8 aspect encoding indicating flat terrain
+ * (gradient magnitude ≈ 0 → no meaningful aspect direction).
+ * Scoring functions return 0.5 (neutral) for this value.
+ */
+export const ASPECT_FLAT: number = 255;
+
+/**
  * Evaluate a transfer function for a given raw input value.
  *
  * @param input - Raw data value (e.g., distance in km, temperature in °C)
@@ -121,6 +128,9 @@ const WIND_ROSE_KEYS: readonly (keyof AspectPreferences)[] =
  * @returns Score 0-1
  */
 export function scoreAspectAngle(angleDeg: number, prefs: AspectPreferences): number {
+  // Flat-terrain sentinel → neutral score
+  if (angleDeg < 0) return 0.5;
+
   // Normalise to [0, 360)
   let a = angleDeg % 360;
   if (a < 0) a += 360;
@@ -145,8 +155,10 @@ export function scoreAspectAngle(angleDeg: number, prefs: AspectPreferences): nu
  */
 export function buildAspectScoreLut(prefs: AspectPreferences): Float32Array {
   const lut = new Float32Array(256);
-  for (let i = 0; i < 256; i++) {
-    lut[i] = scoreAspectAngle(i * 360 / 256, prefs);
+  for (let i = 0; i < 255; i++) {
+    lut[i] = scoreAspectAngle(i * 360 / 255, prefs);
   }
+  // Sentinel 255 = flat terrain → neutral
+  lut[ASPECT_FLAT] = 0.5;
   return lut;
 }

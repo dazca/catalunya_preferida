@@ -8,13 +8,13 @@ import type { LayerId, LayerMeta, MunicipalityCollection } from '../types';
 import type { LayerConfigs } from '../types/transferFunction';
 import type { MunicipalityData } from './scorer';
 import { scoreSingleTf, combineSubScores, normalizeIne } from './scorer';
-import { scoreAspect } from './transferFunction';
+import { scoreAspect, scoreAspectAngle } from './transferFunction';
 import {
   nearestDistanceKm,
   pointInPolygon,
   idwInterpolatePoint,
 } from './spatial';
-import { getSlopeAt, getElevationAt, getAspectAt } from './demSlope';
+import { getSlopeAt, getElevationAt, getAspectAt, getAspectAngleAt } from './demSlope';
 import type { PointLocation, StationValue } from './spatial';
 
 /** Facility point arrays grouped by category. */
@@ -86,11 +86,13 @@ function scorePointLayer(
     const realSlope   = (pointLon != null && pointLat != null) ? getSlopeAt(pointLon, pointLat)    : null;
     const realElev    = (pointLon != null && pointLat != null) ? getElevationAt(pointLon, pointLat) : null;
     const realAspect  = (pointLon != null && pointLat != null) ? getAspectAt(pointLon, pointLat)   : null;
+    const realAngle   = (pointLon != null && pointLat != null) ? getAspectAngleAt(pointLon, pointLat) : null;
     const t = codi ? data.terrain[normalizeIne(codi)] : undefined;
     return {
-      slopeDeg:   realSlope   ?? t?.avgSlopeDeg,
-      elevationM: realElev    ?? t?.avgElevationM,
-      aspect:     realAspect  ?? t?.dominantAspect ?? 'N',
+      slopeDeg:    realSlope   ?? t?.avgSlopeDeg,
+      elevationM:  realElev    ?? t?.avgElevationM,
+      aspect:      realAspect  ?? t?.dominantAspect ?? 'N',
+      aspectAngle: realAngle,  // numeric degrees or -1 (flat) or null
     };
   };
 
@@ -108,8 +110,13 @@ function scorePointLayer(
       return combineSubScores([scoreSingleTf(elevationM, configs.terrain.elevation)]);
     }
     case 'terrainAspect': {
-      const { aspect } = getTerrainVals();
-      return { score: scoreAspect(aspect, configs.terrain.aspect), disqualified: false };
+      const { aspect, aspectAngle } = getTerrainVals();
+      const aw = configs.terrain.aspectWeight ?? 1;
+      // Prefer numeric angle for smooth interpolation (matches heatmap)
+      const rawScore = aspectAngle != null
+        ? scoreAspectAngle(aspectAngle, configs.terrain.aspect)
+        : scoreAspect(aspect, configs.terrain.aspect);
+      return { score: 0.5 + (rawScore - 0.5) * aw, disqualified: false };
     }
 
     case 'votesLeft': {
