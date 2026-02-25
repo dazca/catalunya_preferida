@@ -129,6 +129,7 @@ export default function MapContainer({
   const selectMunicipality = useAppStore((s) => s.selectMunicipality);
   const analysisPoint = useAppStore((s) => s.analysisPoint);
   const setAnalysisPoint = useAppStore((s) => s.setAnalysisPoint);
+  const pointAnalysisMode = useAppStore((s) => s.pointAnalysisMode);
   const view = useAppStore((s) => s.view);
 
   /* -- Mutable refs so event handlers see current values -- */
@@ -142,6 +143,8 @@ export default function MapContainer({
   useEffect(() => { onViewportChangeRef.current = onViewportChange; }, [onViewportChange]);
   const analysisPointRef = useRef(analysisPoint);
   useEffect(() => { analysisPointRef.current = analysisPoint; }, [analysisPoint]);
+  const pointAnalysisModeRef = useRef(pointAnalysisMode);
+  useEffect(() => { pointAnalysisModeRef.current = pointAnalysisMode; }, [pointAnalysisMode]);
 
   /* ---------------------------------------------------------------- */
   /*  Map initialisation (runs once)                                  */
@@ -336,25 +339,33 @@ export default function MapContainer({
         }
       }
 
-      /* -- Click handlers -- */
+      /* -- Click / hover handlers -- */
 
-      // Click on municipality — set analysis point + select
-      map.on('click', 'municipalities-fill', (e) => {
-        const feat = e.features?.[0];
-        if (!feat?.properties?.codi) return;
-        const codi = feat.properties.codi as string;
-        selectMunicipality(codi);
-        map.setFilter('municipalities-highlight', ['==', 'codi', codi]);
-        setPointRef.current({ lat: e.lngLat.lat, lon: e.lngLat.lng });
-        hoverPopupRef.current?.remove();
-      });
+      // Throttle hover updates to at most once per animation frame.
+      let hoverRaf = 0;
+      let hoverLat = 0;
+      let hoverLon = 0;
+      const flushHoverPoint = () => {
+        hoverRaf = 0;
+        setPointRef.current({ lat: hoverLat, lon: hoverLon });
+      };
 
-      // Click on empty area — clear analysis point
       map.on('click', (e) => {
         const features = map.queryRenderedFeatures(e.point, { layers: ['municipalities-fill'] });
-        if (features.length === 0) {
-          setPointRef.current(null);
+        const feat = features[0];
+
+        if (feat?.properties?.codi) {
+          const codi = feat.properties.codi as string;
+          selectMunicipality(codi);
+          map.setFilter('municipalities-highlight', ['==', 'codi', codi]);
+        } else {
+          selectMunicipality(null);
+          map.setFilter('municipalities-highlight', ['==', 'codi', '']);
         }
+
+        // Always pin exact clicked coordinate for point analysis.
+        setPointRef.current({ lat: e.lngLat.lat, lon: e.lngLat.lng });
+        hoverPopupRef.current?.remove();
       });
 
       /* -- Hover score tooltip -- */
@@ -367,11 +378,30 @@ export default function MapContainer({
       });
       hoverPopupRef.current = hoverPopup;
 
-      map.on('mousemove', 'municipalities-fill', (e) => {
+      map.on('mousemove', (e) => {
+        const modeOn = pointAnalysisModeRef.current;
+        if (modeOn) {
+          hoverPopup.remove();
+          map.getCanvas().style.cursor = 'crosshair';
+          hoverLat = e.lngLat.lat;
+          hoverLon = e.lngLat.lng;
+          if (!hoverRaf) {
+            hoverRaf = requestAnimationFrame(flushHoverPoint);
+          }
+          return;
+        }
+
         // Hide hover tooltip when a point is pinned
         if (analysisPointRef.current) return;
-        const feat = e.features?.[0];
-        if (!feat?.properties?.codi) { hoverPopup.remove(); return; }
+
+        const features = map.queryRenderedFeatures(e.point, { layers: ['municipalities-fill'] });
+        const feat = features[0];
+        if (!feat?.properties?.codi) {
+          hoverPopup.remove();
+          map.getCanvas().style.cursor = '';
+          return;
+        }
+
         const codi = feat.properties.codi as string;
         const nom = (feat.properties.nom as string) ?? '';
         const score = scoresRef.current[codi];
@@ -382,7 +412,11 @@ export default function MapContainer({
           .addTo(map);
         map.getCanvas().style.cursor = 'pointer';
       });
-      map.on('mouseleave', 'municipalities-fill', () => {
+      map.on('mouseleave', () => {
+        if (hoverRaf) {
+          cancelAnimationFrame(hoverRaf);
+          hoverRaf = 0;
+        }
         hoverPopup.remove();
         map.getCanvas().style.cursor = '';
       });
@@ -539,6 +573,15 @@ export default function MapContainer({
       hoverPopupRef.current?.remove();
     }
   }, [analysisPoint]);
+
+  /** In point-analysis mode, keep crosshair cursor by default. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !loadedRef.current) return;
+    if (pointAnalysisMode) {
+      map.getCanvas().style.cursor = 'crosshair';
+    }
+  }, [pointAnalysisMode]);
 
   /** Pink marker at the analysis point. */
   useEffect(() => {
