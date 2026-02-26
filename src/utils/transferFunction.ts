@@ -26,7 +26,7 @@ export const ASPECT_FLAT: number = 255;
  */
 export function evaluateTransferFunction(input: number, tf: TransferFunction): number {
   const { plateauEnd: M, decayEnd: N, floor, shape } = tf;
-  const high = 1.0;
+  const high = tf.ceiling ?? 1.0;
   const low = floor;
   const span = N - M;
 

@@ -151,12 +151,13 @@ export function applyTfGrid(
   tf: TransferFunction,
 ): void {
   const { plateauEnd: M, decayEnd: N, floor, shape } = tf;
+  const high = tf.ceiling ?? 1;
   switch (shape) {
-    case 'sin':      sinGrid(input, out, M, N, 1, floor); break;
-    case 'invsin':   invsinGrid(input, out, M, N, 1, floor); break;
-    case 'range':    rangeGrid(input, out, M, N, 1, floor); break;
-    case 'invrange': invrangeGrid(input, out, M, N, 1, floor); break;
-    default:         sinGrid(input, out, M, N, 1, floor); break;
+    case 'sin':      sinGrid(input, out, M, N, high, floor); break;
+    case 'invsin':   invsinGrid(input, out, M, N, high, floor); break;
+    case 'range':    rangeGrid(input, out, M, N, high, floor); break;
+    case 'invrange': invrangeGrid(input, out, M, N, high, floor); break;
+    default:         sinGrid(input, out, M, N, high, floor); break;
   }
 }
 

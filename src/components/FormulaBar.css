@@ -781,6 +781,7 @@
   display: flex;
   gap: 4px;
 }
+.fb-popover-minimize,
 .fb-popover-solo,
 .fb-popover-remove {
   width: 24px;
@@ -795,6 +796,11 @@
   align-items: center;
   justify-content: center;
   transition: all 0.14s;
+}
+.fb-popover-minimize:hover {
+  color: #c7d2fe;
+  border-color: rgba(99,102,241,0.45);
+  background: rgba(99,102,241,0.10);
 }
 .fb-popover-solo:hover {
   color: #f59e0b;

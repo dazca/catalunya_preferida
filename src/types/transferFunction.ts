@@ -29,6 +29,8 @@ export interface TransferFunction {
   plateauEnd: number;
   /** End of the transition zone (raw data units). */
   decayEnd: number;
+  /** Output value at the "high" end of the curve (0-1). Defaults to 1. */
+  ceiling?: number;
   /** Output value at the "low" end of the curve (0-1). */
   floor: number;
   /** If true, this layer is required — municipality is disqualified if score = floor. */
@@ -156,7 +158,7 @@ export function defaultTf(
   shape: TfShape = 'sin',
   floor = 0,
 ): TransferFunction {
-  return { plateauEnd, decayEnd, floor, mandatory: false, important: false, multiplier: 1, shape };
+  return { plateauEnd, decayEnd, ceiling: 1, floor, mandatory: false, important: false, multiplier: 1, shape };
 }
 
 /** Default aspect preferences: slight preference for south-facing slopes. */

@@ -89,6 +89,14 @@
   opacity: 0.6;
 }
 
+/* Ceiling line */
+.ce-ceiling-line {
+  stroke: #66bb6a;
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+  opacity: 0.6;
+}
+
 /* Draggable handles */
 .ce-handle {
   cursor: grab;
@@ -124,6 +132,19 @@
 
 .ce-handle-floor:hover,
 .ce-handle-floor.active {
+  cursor: ns-resize;
+}
+
+.ce-handle-ceiling {
+  fill: #66bb6a;
+  stroke: #fff;
+  stroke-width: 1.5;
+  opacity: 0.9;
+  cursor: ns-resize;
+}
+
+.ce-handle-ceiling:hover,
+.ce-handle-ceiling.active {
   cursor: ns-resize;
 }
 

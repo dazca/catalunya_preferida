@@ -63,7 +63,8 @@ function buildLayerFormulaTerm(id: LayerId, configs: LayerConfigs): string | nul
   if (!tf || !varName) return null;
   const fn = tfFnName(tf);
   const args = [varName, fmtN(tf.plateauEnd), fmtN(tf.decayEnd)];
-  if (tf.floor !== 0) args.push('1', fmtN(tf.floor));
+  const high = tf.ceiling ?? 1;
+  if (high !== 1 || tf.floor !== 0) args.push(fmtN(high), fmtN(tf.floor));
   return `1 * ${fn}(${args.join(', ')})`;
 }
 
@@ -171,17 +172,9 @@ function TfControls({
 
   return (
     <div className="fb-tf-controls">
-      {/* Header: label + enabled */}
+      {/* Header: label */}
       <div className="fb-tf-header">
         <span className="fb-tf-label">{label}</span>
-        <label className="fb-tf-enabled">
-          <input
-            type="checkbox"
-            checked={ltc.enabled}
-            onChange={(e) => onChange({ ...ltc, enabled: e.target.checked })}
-          />
-          {t('tf.on')}
-        </label>
       </div>
 
       {/* Row 1: Shape toggle + flags */}
@@ -229,18 +222,25 @@ function TfControls({
         </label>
       </div>
 
-      {/* Row 3: Floor + Strength */}
+      {/* Row 3: Ceiling/Floor (aka strength up/down) */}
       <div className="fb-tf-row fb-tf-row-floor">
-        <label className="fb-tf-param" title="Minimum output value (0–1)">
-          <span className="fb-tf-param-label">Floor</span>
-          <input type="number" min="0" max="1" step="0.01" value={tf.floor}
-            onChange={(e) => updateTf({ ...tf, floor: +e.target.value })} />
+        <label className="fb-tf-param" title="Upper output bound (Ceiling / Strength up)">
+          <span className="fb-tf-param-label">Ceiling ↑</span>
+          <input type="number" min="0" max="1" step="0.01" value={tf.ceiling ?? 1}
+            onChange={(e) => {
+              const next = Math.max(0, Math.min(1, +e.target.value));
+              const low = tf.floor;
+              updateTf({ ...tf, ceiling: Math.max(next, low) });
+            }} />
         </label>
-        <label className="fb-tf-param" title="Multiplier strength (scales this layer)">
-          <span className="fb-tf-param-label">Strength</span>
-          <input type="number" min="0.1" max="3" step="0.1"
-            value={tf.multiplier}
-            onChange={(e) => updateTf({ ...tf, multiplier: +e.target.value })} />
+        <label className="fb-tf-param" title="Lower output bound (Floor / Strength down)">
+          <span className="fb-tf-param-label">Floor ↓</span>
+          <input type="number" min="0" max="1" step="0.01" value={tf.floor}
+            onChange={(e) => {
+              const next = Math.max(0, Math.min(1, +e.target.value));
+              const high = tf.ceiling ?? 1;
+              updateTf({ ...tf, floor: Math.min(next, high) });
+            }} />
         </label>
       </div>
 
@@ -365,7 +365,7 @@ function EditPopover({
   pinned,
   duplicateCount,
   onPin,
-  onClose: _onClose,
+  onClose,
   onRemove,
   onWeightChange,
   onMouseEnter,
@@ -408,6 +408,11 @@ function EditPopover({
           {t(`layer.${layer.id}.label` as keyof Translations) || layer.label}
         </span>
         <div className="fb-popover-actions">
+          <button className="fb-popover-minimize"
+            onClick={(e) => { e.stopPropagation(); onClose(); }}
+            title="Minimize editor">
+            —
+          </button>
           <button className={`fb-popover-solo ${isSolo ? 'active' : ''}`}
             onClick={(e) => { e.stopPropagation(); setSoloLayer(isSolo ? null : layer.id); }}
             title={isSolo ? t('solo.button.on' as keyof Translations) : t('solo.button.off' as keyof Translations)}>
@@ -1712,17 +1717,18 @@ export default function FormulaBar() {
     );
   }, [formulaSections, renderGuardChip, renderSimpleTerm]);
 
-  /* ── Close popover on outside click ──────────────────────────── */
+  /* ── Close popover on outside click (hover or pinned) ────────── */
   useEffect(() => {
-    if (!pinnedChip) return;
+    if (!activeChip) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (target.closest('.fb-popover') || target.closest('.fb-chip') || target.closest('.fb-add-wrap')) return;
       setPinnedChip(null);
+      setHoveredChip(null);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [pinnedChip]);
+  }, [activeChip]);
 
   /* ── Close view dropdown on outside click ────────────────────── */
   useEffect(() => {

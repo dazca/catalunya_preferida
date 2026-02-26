@@ -173,10 +173,11 @@ export function visualToRawFormula(
     const fn = SHAPE_FN[shape];
     const isInv = shape === 'invsin' || shape === 'invrange';
 
-    // Build function call: FN(var, M, N [, 1, floor])
+    // Build function call: FN(var, M, N [, high, low])
     const args = [varName, fmtNum(tf.plateauEnd), fmtNum(tf.decayEnd)];
-    if (tf.floor !== 0) {
-      args.push('1', fmtNum(tf.floor));
+    const high = tf.ceiling ?? 1;
+    if (high !== 1 || tf.floor !== 0) {
+      args.push(fmtNum(high), fmtNum(tf.floor));
     }
     const call = `${fn}(${args.join(', ')})`;
 

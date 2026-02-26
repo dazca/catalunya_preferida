@@ -59,7 +59,7 @@ function fromSvgY(svgY: number): number {
  */
 function buildCurvePath(tf: TransferFunction, rangeMax: number): string {
   const { plateauEnd: M, decayEnd: N, floor, shape } = tf;
-  const high = 1.0;
+  const high = tf.ceiling ?? 1.0;
   const low = floor;
   const steps = 60;
   const points: string[] = [];
@@ -103,7 +103,7 @@ function buildCurvePath(tf: TransferFunction, rangeMax: number): string {
   return points.join(' ');
 }
 
-type DragTarget = 'plateauEnd' | 'decayEnd' | 'floor' | null;
+type DragTarget = 'plateauEnd' | 'decayEnd' | 'floor' | 'ceiling' | null;
 
 export default function CurveEditor({
   tf,
@@ -149,7 +149,11 @@ export default function CurveEditor({
         onChange({ ...tf, decayEnd: Math.max(val, tf.plateauEnd + rangeMax * 0.01) });
       } else if (dragging === 'floor') {
         const val = fromSvgY(pt.y);
-        onChange({ ...tf, floor: Math.round(val * 20) / 20 }); // Snap to 0.05
+        const high = tf.ceiling ?? 1;
+        onChange({ ...tf, floor: Math.min(Math.round(val * 20) / 20, high) }); // Snap to 0.05
+      } else if (dragging === 'ceiling') {
+        const val = fromSvgY(pt.y);
+        onChange({ ...tf, ceiling: Math.max(Math.round(val * 20) / 20, tf.floor) }); // Snap to 0.05
       }
     },
     [dragging, tf, rangeMax, onChange, getSvgPoint],
@@ -161,13 +165,15 @@ export default function CurveEditor({
 
   // Handle positions
   const isInv = tf.shape === 'invsin' || tf.shape === 'invrange';
+  const ceiling = tf.ceiling ?? 1;
   const plateauX = toSvgX(tf.plateauEnd, rangeMax);
   const decayX = toSvgX(tf.decayEnd, rangeMax);
+  const ceilingY = toSvgY(ceiling);
   const floorY = toSvgY(tf.floor);
-  // For normal shapes, plateau handle at top (1.0) and decay at floor.
-  // For inverted shapes, plateau handle at floor (low) and decay at top (1.0).
-  const plateauHandleY = isInv ? floorY : toSvgY(1.0);
-  const decayHandleY = isInv ? toSvgY(1.0) : floorY;
+  // For normal shapes, plateau handle at high and decay at low.
+  // For inverted shapes, plateau handle at low and decay at high.
+  const plateauHandleY = isInv ? floorY : ceilingY;
+  const decayHandleY = isInv ? ceilingY : floorY;
 
   // Shape cycling
   const SHAPES: TfShape[] = ['sin', 'invsin', 'range', 'invrange'];
@@ -295,6 +301,15 @@ export default function CurveEditor({
         </g>
       )}
 
+      {/* Ceiling line */}
+      <line
+        x1={PAD_L}
+        y1={ceilingY}
+        x2={PAD_L + PLOT_W}
+        y2={ceilingY}
+        className="ce-ceiling-line"
+      />
+
       {/* Floor line */}
       <line
         x1={decayX}
@@ -349,6 +364,15 @@ export default function CurveEditor({
         className={`ce-handle ce-handle-floor ${dragging === 'floor' ? 'active' : ''}`}
         onMouseDown={handleMouseDown('floor')}
       />
+      <rect
+        x={PAD_L + PLOT_W - 24}
+        y={ceilingY - 5}
+        width={10}
+        height={10}
+        rx={2}
+        className={`ce-handle ce-handle-ceiling ${dragging === 'ceiling' ? 'active' : ''}`}
+        onMouseDown={handleMouseDown('ceiling')}
+      />
 
       {/* Handle labels */}
       <text x={plateauX} y={plateauHandleY - 10} className="ce-handle-label">
@@ -359,6 +383,9 @@ export default function CurveEditor({
       </text>
       <text x={PAD_L + PLOT_W + 2} y={floorY + 3} className="ce-handle-label ce-floor-label">
         {(tf.floor * 100).toFixed(0)}%
+      </text>
+      <text x={PAD_L + PLOT_W - 28} y={ceilingY + 3} className="ce-handle-label ce-floor-label">
+        {(ceiling * 100).toFixed(0)}%
       </text>
 
       {/* Shape badge (clickable to cycle) */}
