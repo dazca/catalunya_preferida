@@ -355,21 +355,17 @@ export default function CurveEditor({
         className={`ce-handle ce-handle-decay ${dragging === 'decayEnd' ? 'active' : ''}`}
         onMouseDown={handleMouseDown('decayEnd')}
       />
-      <rect
-        x={PAD_L + PLOT_W - 10}
-        y={floorY - 5}
-        width={10}
-        height={10}
-        rx={2}
+      <circle
+        cx={PAD_L + PLOT_W - 6}
+        cy={floorY}
+        r={5.2}
         className={`ce-handle ce-handle-floor ${dragging === 'floor' ? 'active' : ''}`}
         onMouseDown={handleMouseDown('floor')}
       />
-      <rect
-        x={PAD_L + PLOT_W - 24}
-        y={ceilingY - 5}
-        width={10}
-        height={10}
-        rx={2}
+      <circle
+        cx={PAD_L + PLOT_W - 20}
+        cy={ceilingY}
+        r={5.2}
         className={`ce-handle ce-handle-ceiling ${dragging === 'ceiling' ? 'active' : ''}`}
         onMouseDown={handleMouseDown('ceiling')}
       />
@@ -384,7 +380,7 @@ export default function CurveEditor({
       <text x={PAD_L + PLOT_W + 2} y={floorY + 3} className="ce-handle-label ce-floor-label">
         {(tf.floor * 100).toFixed(0)}%
       </text>
-      <text x={PAD_L + PLOT_W - 28} y={ceilingY + 3} className="ce-handle-label ce-floor-label">
+      <text x={PAD_L + PLOT_W - 34} y={ceilingY + 3} className="ce-handle-label ce-floor-label">
         {(ceiling * 100).toFixed(0)}%
       </text>
 

@@ -125,8 +125,8 @@
 .ce-handle-floor {
   fill: #ffa726;
   stroke: #fff;
-  stroke-width: 1.5;
-  opacity: 0.85;
+  stroke-width: 1.8;
+  opacity: 0.95;
   cursor: ns-resize;
 }
 
@@ -138,8 +138,8 @@
 .ce-handle-ceiling {
   fill: #66bb6a;
   stroke: #fff;
-  stroke-width: 1.5;
-  opacity: 0.9;
+  stroke-width: 1.8;
+  opacity: 0.95;
   cursor: ns-resize;
 }
 

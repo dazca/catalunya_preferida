@@ -837,6 +837,8 @@
   height: 3px;
   accent-color: #6366f1;
   cursor: pointer;
+  font-size: 0;
+  line-height: 1;
 }
 .fb-popover-wval {
   font-size: 11px;
@@ -845,6 +847,18 @@
   min-width: 28px;
   text-align: right;
   flex-shrink: 0;
+  cursor: text;
+}
+
+.fb-popover-wval-input {
+  width: 52px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.04);
+  color: #a5b4fc;
+  font-family: inherit;
+  text-align: right;
 }
 
 /* Popover body (editor area) */

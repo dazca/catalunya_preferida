@@ -386,6 +386,18 @@ function EditPopover({
   const { soloLayer, setSoloLayer } = useAppStore();
   const t = useT();
   const isSolo = soloLayer === layer.id;
+  const [editingWeight, setEditingWeight] = useState(false);
+  const [weightDraft, setWeightDraft] = useState(weightValue.toFixed(2));
+
+  useEffect(() => {
+    if (!editingWeight) setWeightDraft(weightValue.toFixed(2));
+  }, [editingWeight, weightValue]);
+
+  const commitWeightDraft = useCallback(() => {
+    const parsed = parseFloat(weightDraft);
+    if (Number.isFinite(parsed)) onWeightChange?.(Math.max(0, parsed));
+    setEditingWeight(false);
+  }, [onWeightChange, weightDraft]);
 
   // Position above the chip, clamped to viewport
   const style = useMemo(() => {
@@ -428,9 +440,28 @@ function EditPopover({
       {/* Weight slider */}
       <div className="fb-popover-weight">
         <span>{t('fp.weight')}</span>
-        <input type="range" min="0" max="2" step="0.1" value={weightValue}
+        <input type="range" min="0" max={Math.max(2, weightValue)} step="0.1" value={weightValue}
           onChange={(e) => onWeightChange?.(parseFloat(e.target.value))} />
-        <span className="fb-popover-wval">{weightValue.toFixed(1)}</span>
+        {editingWeight ? (
+          <input
+            className="fb-popover-wval fb-popover-wval-input"
+            type="number"
+            min="0"
+            step="0.1"
+            value={weightDraft}
+            onChange={(e) => setWeightDraft(e.target.value)}
+            onBlur={commitWeightDraft}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitWeightDraft();
+              if (e.key === 'Escape') { setWeightDraft(weightValue.toFixed(2)); setEditingWeight(false); }
+            }}
+            autoFocus
+          />
+        ) : (
+          <span className="fb-popover-wval" onClick={() => setEditingWeight(true)} title="Click to edit weight">
+            {weightValue.toFixed(1)}
+          </span>
+        )}
       </div>
 
       {duplicateCount && duplicateCount > 1 && (
@@ -713,10 +744,23 @@ export default function FormulaBar() {
   const [popoverRect, setPopoverRect] = useState<DOMRect | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chipRefs = useRef<Map<string, HTMLSpanElement>>(new Map());
+  const isDraggingRef = useRef(false);
+  const suppressPopoverUntilRef = useRef(0);
   const activeChip = pinnedChip ?? hoveredChip;
   const activeChipKey = activeChip?.key ?? null;
   const activeId = activeChip?.layerId ?? null;
   const activeLayer = activeId ? layers.find((l) => l.id === activeId) : null;
+
+  const suppressPopover = useCallback((cooldownMs = 0) => {
+    suppressPopoverUntilRef.current = Date.now() + cooldownMs;
+    setPinnedChip(null);
+    setHoveredChip(null);
+  }, []);
+
+  const isPopoverSuppressed = useCallback(
+    () => isDraggingRef.current || Date.now() < suppressPopoverUntilRef.current,
+    [],
+  );
 
   // Drag-to-reorder state
   type SectionKind = 'guard' | 'important' | 'sum';
@@ -919,11 +963,12 @@ export default function FormulaBar() {
 
   /* ── Chip hover / click handlers ─────────────────────────────── */
   const handleChipHover = useCallback((chipKey: string, id: LayerId) => {
+    if (isPopoverSuppressed()) return;
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
     const el = chipRefs.current.get(chipKey);
     if (el) setPopoverRect(el.getBoundingClientRect());
     setHoveredChip({ key: chipKey, layerId: id });
-  }, []);
+  }, [isPopoverSuppressed]);
 
   const handleChipLeave = useCallback(() => {
     if (!pinnedChip) {
@@ -932,6 +977,7 @@ export default function FormulaBar() {
   }, [pinnedChip]);
 
   const handleChipClick = useCallback((chipKey: string, id: LayerId) => {
+    if (isPopoverSuppressed()) return;
     ensureLayerEnabled(id);
     const el = chipRefs.current.get(chipKey);
     if (el) setPopoverRect(el.getBoundingClientRect());
@@ -941,7 +987,7 @@ export default function FormulaBar() {
       setPinnedChip({ key: chipKey, layerId: id });
       setHoveredChip(null);
     }
-  }, [ensureLayerEnabled, pinnedChip]);
+  }, [ensureLayerEnabled, isPopoverSuppressed, pinnedChip]);
 
   const handlePopoverRemove = useCallback(() => {
     if (!activeId) return;
@@ -1230,6 +1276,8 @@ export default function FormulaBar() {
         executeReorder(cd.section, cd.idx, dropTarget.idx);
       }
       chipDragRef.current = null;
+      isDraggingRef.current = false;
+      suppressPopover(260);
       setDragReorder(null);
       setDropTarget(null);
       document.body.style.cursor = '';
@@ -1243,7 +1291,7 @@ export default function FormulaBar() {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
-  }, [dropTarget, executeReorder, findDropIndex]);
+  }, [dropTarget, executeReorder, findDropIndex, suppressPopover]);
 
   /** Start chip drag intent tracking. Call from onPointerDown on the chip. */
   const startChipDrag = useCallback((
@@ -1256,6 +1304,8 @@ export default function FormulaBar() {
   ) => {
     e.preventDefault();
     e.stopPropagation();
+    isDraggingRef.current = true;
+    suppressPopover();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     chipDragRef.current = {
       intent: 'pending',
@@ -1268,7 +1318,7 @@ export default function FormulaBar() {
       adjustStep: adjustStep ?? 0.01,
       adjustCb: adjustCb ?? null,
     };
-  }, []);
+  }, [suppressPopover]);
 
   /* ── Drag-to-adjust helper ───────────────────────────────────── */
   const dragState = useRef<{
@@ -1285,21 +1335,28 @@ export default function FormulaBar() {
       const dy = ds.startY - e.clientY; // up = positive
       ds.onDelta(parseFloat((ds.startVal + dy * ds.step).toFixed(2)));
     };
-    const onUp = () => { dragState.current = null; };
+    const onUp = () => {
+      if (!dragState.current) return;
+      dragState.current = null;
+      isDraggingRef.current = false;
+      suppressPopover(260);
+    };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     return () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
-  }, []);
+  }, [suppressPopover]);
 
   const startDrag = useCallback((e: React.PointerEvent, startVal: number, onDelta: (v: number) => void, step: number) => {
     e.preventDefault();
     e.stopPropagation();
+    isDraggingRef.current = true;
+    suppressPopover();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     dragState.current = { startY: e.clientY, startVal, step, onDelta };
-  }, []);
+  }, [suppressPopover]);
 
   /* ── Mutate an AST number node and re-serialize into customFormula ── */
   const patchAstNumber = useCallback((node: AstNode, newVal: number) => {
@@ -1567,6 +1624,18 @@ export default function FormulaBar() {
       if (layerId) { ensureLayerEnabled(layerId); setLayerWeight(layerId, clamped); }
     } : undefined;
 
+    const onMDrag = showParams && layerId ? (v: number) => {
+      ensureLayerEnabled(layerId);
+      patchTfParam(layerId, 'plateauEnd', v);
+    } : undefined;
+
+    const onNDrag = showParams && layerId ? (v: number) => {
+      ensureLayerEnabled(layerId);
+      patchTfParam(layerId, 'decayEnd', v);
+    } : undefined;
+
+    const paramStep = (val: number) => Math.max(0.2, Math.abs(val) * 0.002);
+
     return (
       <span
         key={chipKey}
@@ -1581,10 +1650,12 @@ export default function FormulaBar() {
           // Determine if user pressed on a weight / param element
           const target = e.target as HTMLElement;
           const isWeight = target.classList.contains('fb-chip-weight');
+          const isM = target.classList.contains('fb-chip-param-m');
+          const isN = target.classList.contains('fb-chip-param-n');
           startChipDrag(e, section, idx,
-            isWeight ? term.weight : undefined,
-            isWeight ? 0.01 : undefined,
-            isWeight ? onWeightDrag : undefined,
+            isWeight ? term.weight : isM ? term.M : isN ? term.N : undefined,
+            isWeight ? 0.01 : isM ? paramStep(term.M) : isN ? paramStep(term.N) : undefined,
+            isWeight ? onWeightDrag : isM ? onMDrag : isN ? onNDrag : undefined,
           );
         }}
         onMouseEnter={() => layerId && handleChipHover(chipKey, layerId)}
@@ -1598,14 +1669,14 @@ export default function FormulaBar() {
         <span className="fb-chip-icon">{icon}</span>
         {showParams && (
           <>
-            <span className="fb-chip-param">{fmtN(term.M)}</span>
+            <span className="fb-chip-param fb-chip-param-m">{fmtN(term.M)}</span>
             <span className="fb-chip-comma">,</span>
-            <span className="fb-chip-param">{fmtN(term.N)}</span>
+            <span className="fb-chip-param fb-chip-param-n">{fmtN(term.N)}</span>
           </>
         )}
       </span>
     );
-  }, [activeChipKey, dropTarget, ensureLayerEnabled, handleChipClick, handleChipContextMenu, handleChipHover, handleChipLeave, layers, setLayerWeight, showParams, soloLayer, startChipDrag, varToLayerId]);
+  }, [activeChipKey, dropTarget, ensureLayerEnabled, handleChipClick, handleChipContextMenu, handleChipHover, handleChipLeave, layers, patchTfParam, setLayerWeight, showParams, soloLayer, startChipDrag, varToLayerId]);
 
   /* ── Render a guard chip (comparison) ────────────────────────── */
   const renderGuardChip = useCallback((guard: { varName: string; op: string; value: number }, chipKey: string, idx: number) => {
