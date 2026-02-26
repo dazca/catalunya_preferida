@@ -492,6 +492,74 @@
   background: rgba(99, 102, 241, 0.03);
 }
 
+/* ── Paren-group hover highlight ─────────────────────────── */
+.fb-paren-group {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 4px;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+.fb-paren-group:hover {
+  background: rgba(139, 92, 246, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.18);
+}
+.fb-paren-group:hover > .fb-paren {
+  color: #a78bfa;
+  opacity: 1;
+}
+
+/* ── Radical (√) math rendering ──────────────────────────── */
+.fb-radical {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0;
+}
+.fb-radical-sign {
+  font-size: 16px;
+  font-weight: 700;
+  color: #a78bfa;
+  line-height: 1;
+  align-self: flex-end;
+  margin-right: 1px;
+}
+.fb-radical-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-top: 2px solid #a78bfa;
+  padding-top: 1px;
+  padding-left: 2px;
+  padding-right: 3px;
+}
+
+/* ── Absolute value |…| math rendering ───────────────────── */
+.fb-abs-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+.fb-abs-bar {
+  font-size: 15px;
+  font-weight: 700;
+  color: #a78bfa;
+  padding: 0 1px;
+}
+
+/* ── Math function label (log, sgn, cos, …) ──────────────── */
+.fb-math-fn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+.fb-math-fn-label {
+  font-size: 12px;
+  font-weight: 600;
+  font-style: italic;
+  color: #a78bfa;
+  margin-right: 1px;
+  letter-spacing: 0.2px;
+}
+
 .fb-section-item {
   display: inline-flex;
   align-items: center;

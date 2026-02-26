@@ -1544,7 +1544,8 @@ export default function FormulaBar() {
   }, [configs, updateConfig]);
 
   /* ── Compact chip for a recognized TF term ───────────────────── */
-  const showParams = formulaMode === 'visual'; // visual-short hides M,N
+  const showParams = formulaMode === 'visual' || formulaMode === 'math'; // visual-short & math-short hide M,N
+  const isMathMode = formulaMode === 'math-short' || formulaMode === 'math';
   const renderCompactChip = useCallback((
     layerId: LayerId | null,
     icon: string,
@@ -1700,8 +1701,45 @@ export default function FormulaBar() {
       );
     }
     if (node.kind === 'call') {
+      /* Math-mode rendering for known wrapper functions */
+      if (isMathMode && node.args.length === 1) {
+        const inner = renderVisualNode(node.args[0], `${key}-arg0`);
+        if (node.name === 'SQRT') {
+          return (
+            <span className="fb-paren-group fb-radical" key={key} title="SQRT(…)">
+              <span className="fb-radical-sign">√</span>
+              <span className="fb-radical-content">{inner}</span>
+            </span>
+          );
+        }
+        if (node.name === 'ABS') {
+          return (
+            <span className="fb-paren-group fb-abs-wrap" key={key} title="ABS(…)">
+              <span className="fb-abs-bar">|</span>
+              {inner}
+              <span className="fb-abs-bar">|</span>
+            </span>
+          );
+        }
+        const MATH_FN_LABELS: Record<string, string> = {
+          LOG: 'log', LOG2: 'log₂', LOG10: 'log₁₀',
+          EXP: 'eˣ', SIGN: 'sgn', FLOOR: '⌊⌋', CEIL: '⌈⌉', ROUND: '≈',
+          COS: 'cos', SIN: 'sin', TAN: 'tan', ACOS: 'acos', ASIN: 'asin', ATAN: 'atan',
+        };
+        const mathLabel = MATH_FN_LABELS[node.name];
+        if (mathLabel) {
+          return (
+            <span className="fb-paren-group fb-math-fn" key={key} title={`${node.name}(…)`}>
+              <span className="fb-math-fn-label">{mathLabel}</span>
+              <span className="fb-paren">(</span>
+              {inner}
+              <span className="fb-paren">)</span>
+            </span>
+          );
+        }
+      }
       return (
-        <span className="fb-ast-token" key={key}>
+        <span className="fb-ast-token fb-paren-group" key={key}>
           {node.name}(
           {node.args.map((a, i) => (
             <span key={`${key}-a${i}`}>
@@ -1720,18 +1758,14 @@ export default function FormulaBar() {
       const rightWrapped = needsParen(node.right, node.op, 'right');
       return (
         <span className="fb-ast-expr" key={key}>
-          {leftWrapped ? <span className="fb-paren">(</span> : null}
-          {left}
-          {leftWrapped ? <span className="fb-paren">)</span> : null}
+          {leftWrapped ? <span className="fb-paren-group"><span className="fb-paren">(</span>{left}<span className="fb-paren">)</span></span> : left}
           <span className="fb-op">{node.op}</span>
-          {rightWrapped ? <span className="fb-paren">(</span> : null}
-          {right}
-          {rightWrapped ? <span className="fb-paren">)</span> : null}
+          {rightWrapped ? <span className="fb-paren-group"><span className="fb-paren">(</span>{right}<span className="fb-paren">)</span></span> : right}
         </span>
       );
     }
     return <span className="fb-ast-token" key={key}>?</span>;
-  }, [activeChipKey, ensureLayerEnabled, handleChipClick, handleChipHover, handleChipLeave, layers, patchAstNumber, renderCompactChip, startDrag, varToLayerId]);
+  }, [activeChipKey, ensureLayerEnabled, handleChipClick, handleChipHover, handleChipLeave, isMathMode, layers, patchAstNumber, renderCompactChip, startDrag, varToLayerId]);
 
   /* ── Render a SimpleTerm as a chip ───────────────────────────── */
   const renderSimpleTerm = useCallback((term: SimpleTerm, chipKey: string, section: 'guard' | 'important' | 'sum', idx: number) => {
@@ -1894,9 +1928,9 @@ export default function FormulaBar() {
           <span className="fb-section-divider">×</span>
         )}
 
-        {/* Sum section */}
+        {/* Sum section — wrapped in hoverable paren group */}
         {hasSum && (
-          <span className="fb-section fb-section-sum">
+          <span className="fb-paren-group fb-section fb-section-sum">
             <span className="fb-paren">(</span>
             {terms.map((term, i) => (
               <span key={`sum-${i}`} className="fb-section-item">
@@ -1916,11 +1950,30 @@ export default function FormulaBar() {
       </>
     ) : null;
 
+    /** Math-mode mapping for common wrapper functions. */
+    const MATH_WRAPPERS: Record<string, { render: 'radical' | 'abs' | 'fn'; label?: string }> = {
+      SQRT:  { render: 'radical' },
+      ABS:   { render: 'abs' },
+      LOG:   { render: 'fn', label: 'log' },
+      LOG2:  { render: 'fn', label: 'log₂' },
+      LOG10: { render: 'fn', label: 'log₁₀' },
+      EXP:   { render: 'fn', label: 'eˣ' },
+      SIGN:  { render: 'fn', label: 'sgn' },
+      FLOOR: { render: 'fn', label: '⌊⌋' },
+      CEIL:  { render: 'fn', label: '⌈⌉' },
+      ROUND: { render: 'fn', label: '≈' },
+      COS:   { render: 'fn', label: 'cos' },
+      TAN:   { render: 'fn', label: 'tan' },
+      ACOS:  { render: 'fn', label: 'acos' },
+      ASIN:  { render: 'fn', label: 'asin' },
+      ATAN:  { render: 'fn', label: 'atan' },
+    };
+
     return (
       <span className="fb-ast-formula fb-sectioned">
-        {/* Guard section */}
+        {/* Guard section — wrapped in hoverable paren group */}
         {hasGuards && (
-          <span className="fb-section fb-section-guard">
+          <span className="fb-paren-group fb-section fb-section-guard">
             {guardInfos.map((g, i) => (
               <span key={`guard-${i}`} className="fb-section-item">
                 {i > 0 && <span className="fb-op fb-section-op">×</span>}
@@ -1937,18 +1990,42 @@ export default function FormulaBar() {
 
         {/* Wrapper (SQRT, ABS, LOG, …) around inner content */}
         {wrapper && hasInner ? (
-          <span className="fb-section fb-section-wrapper">
-            <span className="fb-wrapper-fn">{wrapper.fn}</span>
-            <span className="fb-paren">(</span>
-            {innerContent}
-            <span className="fb-paren">)</span>
-          </span>
+          isMathMode && MATH_WRAPPERS[wrapper.fn] ? (
+            /* Math rendering: √ with overline, |…|, fn(…) */
+            MATH_WRAPPERS[wrapper.fn].render === 'radical' ? (
+              <span className="fb-paren-group fb-section fb-section-wrapper fb-radical" title={`${wrapper.fn}(…)`}>
+                <span className="fb-radical-sign">√</span>
+                <span className="fb-radical-content">{innerContent}</span>
+              </span>
+            ) : MATH_WRAPPERS[wrapper.fn].render === 'abs' ? (
+              <span className="fb-paren-group fb-section fb-section-wrapper fb-abs-wrap" title={`${wrapper.fn}(…)`}>
+                <span className="fb-abs-bar">|</span>
+                {innerContent}
+                <span className="fb-abs-bar">|</span>
+              </span>
+            ) : (
+              <span className="fb-paren-group fb-section fb-section-wrapper fb-math-fn" title={`${wrapper.fn}(…)`}>
+                <span className="fb-math-fn-label">{MATH_WRAPPERS[wrapper.fn].label}</span>
+                <span className="fb-paren">(</span>
+                {innerContent}
+                <span className="fb-paren">)</span>
+              </span>
+            )
+          ) : (
+            /* Standard rendering: FN( … ) */
+            <span className="fb-paren-group fb-section fb-section-wrapper">
+              <span className="fb-wrapper-fn">{wrapper.fn}</span>
+              <span className="fb-paren">(</span>
+              {innerContent}
+              <span className="fb-paren">)</span>
+            </span>
+          )
         ) : (
           innerContent
         )}
       </span>
     );
-  }, [formulaSections, renderGuardChip, renderSimpleTerm, renderVisualNode]);
+  }, [formulaSections, isMathMode, renderGuardChip, renderSimpleTerm, renderVisualNode]);
 
   /* ── Close popover on outside click (hover or pinned) ────────── */
   useEffect(() => {
@@ -2093,6 +2170,20 @@ export default function FormulaBar() {
                     onClick={() => setFormulaMode('visual')}
                   >
                     Visual
+                  </button>
+                  <button
+                    className={`fb-formula-mode-btn ${formulaMode === 'math-short' ? 'active' : ''}`}
+                    onClick={() => setFormulaMode('math-short')}
+                    title="Math notation (compact)"
+                  >
+                    Math ∑
+                  </button>
+                  <button
+                    className={`fb-formula-mode-btn ${formulaMode === 'math' ? 'active' : ''}`}
+                    onClick={() => setFormulaMode('math')}
+                    title="Math notation (full params)"
+                  >
+                    Math ƒ
                   </button>
                   <button
                     className={`fb-formula-mode-btn ${formulaMode === 'raw' ? 'active' : ''}`}

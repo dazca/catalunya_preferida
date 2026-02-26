@@ -452,7 +452,20 @@ export function detectSimpleStructure(node: AstNode): SimpleStructure | null {
     // Parse sum body additive terms
     const addTermNodes = flattenAdd(sumBody);
     for (const termNode of addTermNodes) {
-      const factors = flattenMul(termNode);
+      // Strip trailing `/ weights` or `/ N` that may be attached to the last
+      // additive term when the divisor sits inside the sum parentheses, e.g.
+      // `(A + B + C / weights)` — due to precedence only C gets the `/`.
+      let termInner = termNode;
+      if (termInner.kind === 'binop' && termInner.op === '/') {
+        const div = termInner as BinopNode;
+        if (div.right.kind === 'identifier' && (div.right as IdentNode).name === 'weights') {
+          termInner = div.left;
+        } else if (div.right.kind === 'number') {
+          if (totalWeight < 0) totalWeight = (div.right as NumberNode).value;
+          termInner = div.left;
+        }
+      }
+      const factors = flattenMul(termInner);
       // Separate any inline comparison guards
       const localGuards: BinopNode[] = [];
       const rest: AstNode[] = [];

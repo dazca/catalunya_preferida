@@ -133,8 +133,8 @@ interface AppState {
   lang: Lang;
   /** User-editable composite score formula. */
   customFormula: string;
-  /** Formula editor mode: visual-short (icon+weight), visual (full params), raw. */
-  formulaMode: 'visual-short' | 'visual' | 'raw';
+  /** Formula editor mode: visual-short (icon+weight), visual (full params), math-short, math, raw. */
+  formulaMode: 'visual-short' | 'visual' | 'math-short' | 'math' | 'raw';
   /** Data integrity admin panel visibility. */
   dataIntegrityPanelOpen: boolean;
   /** Persisted integrity rules. */
@@ -157,7 +157,7 @@ interface AppState {
   setView: (patch: Partial<ViewSettings>) => void;
   setCustomFormula: (formula: string) => void;
   resetCustomFormula: () => void;
-  setFormulaMode: (mode: 'visual-short' | 'visual' | 'raw') => void;
+  setFormulaMode: (mode: 'visual-short' | 'visual' | 'math-short' | 'math' | 'raw') => void;
   setDataIntegrityPanelOpen: (open: boolean) => void;
   updateIntegrityRules: (patch: Partial<IntegrityRules>) => void;
   replaceIntegrityRules: (rules: IntegrityRules) => void;
@@ -485,7 +485,8 @@ export const useAppStore = create<AppState>()(
           if (typeof view.maskDisqualifiedAsBlack !== 'boolean') {
             state.view = { ...DEFAULT_VIEW, ...view, maskDisqualifiedAsBlack: true };
           }
-          if (state.formulaMode !== 'raw' && state.formulaMode !== 'visual' && state.formulaMode !== 'visual-short') {
+          if (state.formulaMode !== 'raw' && state.formulaMode !== 'visual' && state.formulaMode !== 'visual-short'
+              && state.formulaMode !== 'math-short' && state.formulaMode !== 'math') {
             state.formulaMode = 'visual-short';
           }
         }
