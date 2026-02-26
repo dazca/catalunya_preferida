@@ -502,11 +502,13 @@ function AddLayerButton({
   allLayers,
   onAdd,
   allowDuplicateAdds,
+  varTfCounts,
 }: {
   enabledLayers: LayerMeta[];
   allLayers: LayerMeta[];
   onAdd: (id: LayerId) => void;
   allowDuplicateAdds?: boolean;
+  varTfCounts?: Map<LayerId, number>;
 }) {
   const [open, setOpen] = useState(false);
   const [hoveredGroup, setHoveredGroup] = useState<number | null>(null);
@@ -584,7 +586,7 @@ function AddLayerButton({
                           title={disabled ? 'Already added' : isAdded ? 'Add again' : ''}>
                           <span className="fb-dd-icon">{l.icon}</span>
                           {t(`layer.${id}.label` as keyof Translations) || l.label}
-                          {isAdded && <span className="fb-add-check">{allowDuplicateAdds ? '+1' : '✓'}</span>}
+                          {isAdded && <span className="fb-add-check">{allowDuplicateAdds ? `+${varTfCounts?.get(id) ?? 1}` : '✓'}</span>}
                         </button>
                       );
                     })}
@@ -611,7 +613,7 @@ function AddLayerButton({
                 title={disabled ? 'Already added' : isAdded ? 'Add again' : ''}>
                 <span className="fb-dd-icon">{l.icon}</span>
                 {t(`layer.${id}.label` as keyof Translations) || l.label}
-                {isAdded && <span className="fb-add-check">{allowDuplicateAdds ? '+1' : '✓'}</span>}
+                {isAdded && <span className="fb-add-check">{allowDuplicateAdds ? `+${varTfCounts?.get(id) ?? 1}` : '✓'}</span>}
               </button>
             );
           })}
@@ -822,16 +824,26 @@ export default function FormulaBar() {
     const importantParts = sections.importantTerms.map((t) => termToCall(t));
     const sumTerms = sections.terms.map((t) => `weight(${fmtN(t.weight)}) * ${termToCall(t)}`);
 
-    const factors: string[] = [...guardParts, ...extraParts, ...importantParts];
+    // Build inner (non-guard) portion
+    const innerFactors: string[] = [...extraParts, ...importantParts];
     if (sumTerms.length > 0) {
       const sumExpr = sumTerms.length > 1 ? `(${sumTerms.join(' + ')})` : sumTerms[0];
-      factors.push(sumExpr);
+      innerFactors.push(sumExpr);
     }
 
+    let innerStr = innerFactors.join(' * ');
+    if (sumTerms.length > 0) innerStr += ' / weights';
+
+    // Re-wrap with math function if present
+    if (sections.wrapper && innerStr) {
+      innerStr = `${sections.wrapper.fn}(${innerStr})`;
+    }
+
+    const factors: string[] = [...guardParts];
+    if (innerStr) factors.push(innerStr);
+
     if (factors.length === 0) return '';
-    let out = factors.join(' * ');
-    if (sumTerms.length > 0) out += ' / weights';
-    return out;
+    return factors.join(' * ');
   }, []);
 
   const activeSumIndex = useMemo(() => {
@@ -998,7 +1010,65 @@ export default function FormulaBar() {
   const handlePopoverRemove = useCallback(() => {
     if (!activeId) return;
 
-    // In custom mode, remove only the active AST occurrence (chip), not the whole layer.
+    // ── Section-based removal (sum-N, imp-N, guard-N, extra-N) ──
+    if (normalizedCustom && formulaSections && activeChipKey) {
+      const secMatch = activeChipKey.match(/^(sum|imp|guard|extra)-(\d+)/);
+      if (secMatch) {
+        const section = secMatch[1];
+        const idx = parseInt(secMatch[2], 10);
+        let next: SimpleStructure;
+        switch (section) {
+          case 'sum':
+            next = { ...formulaSections, terms: formulaSections.terms.filter((_, i) => i !== idx) };
+            break;
+          case 'imp':
+            next = { ...formulaSections, importantTerms: formulaSections.importantTerms.filter((_, i) => i !== idx) };
+            break;
+          case 'guard':
+            next = { ...formulaSections, guards: formulaSections.guards.filter((_, i) => i !== idx) };
+            break;
+          case 'extra':
+            next = { ...formulaSections, extras: formulaSections.extras.filter((_, i) => i !== idx) };
+            break;
+          default:
+            return;
+        }
+        next.totalWeight = next.terms.reduce((acc, t) => acc + t.weight, 0);
+        const nextFormula = buildFormulaFromSections(next);
+        setCustomFormula(nextFormula);
+        setFormulaDraft(nextFormula);
+
+        // If layer no longer appears in the rebuilt formula, disable it
+        const varName = LAYER_VAR[activeId];
+        if (varName && nextFormula) {
+          try {
+            const nextAst = parseFormula(nextFormula);
+            let stillUsed = false;
+            walkAst(nextAst, (node) => {
+              if (stillUsed) return;
+              const tf = tfCallFromNode(node);
+              if (tf && tf.varName === varName) { stillUsed = true; return; }
+              const cmp = comparisonFromNode(node);
+              if (cmp && cmp.varName === varName) stillUsed = true;
+            });
+            if (!stillUsed) {
+              const layer = layers.find((l) => l.id === activeId);
+              if (layer?.enabled) toggleLayer(activeId);
+            }
+          } catch { /* parse failure — leave layer as-is */ }
+        } else if (!nextFormula) {
+          // Formula emptied out — disable layer
+          const layer = layers.find((l) => l.id === activeId);
+          if (layer?.enabled) toggleLayer(activeId);
+        }
+
+        setPinnedChip(null);
+        setHoveredChip(null);
+        return;
+      }
+    }
+
+    // ── AST-based removal (root-... chip keys from non-sectioned rendering) ──
     if (normalizedCustom && visualAst && activeChipKey && activeChipKey.startsWith('root')) {
       const removeByKey = (node: AstNode, targetKey: string, currentKey: string): AstNode | null => {
         if (currentKey === targetKey) return null;
@@ -1054,18 +1124,43 @@ export default function FormulaBar() {
     toggleLayer(activeId);
     setPinnedChip(null);
     setHoveredChip(null);
-  }, [activeChipKey, activeId, layers, normalizedCustom, setCustomFormula, toggleLayer, visualAst]);
+  }, [activeChipKey, activeId, buildFormulaFromSections, formulaSections, layers, normalizedCustom, setCustomFormula, toggleLayer, visualAst]);
 
   /* ── [+] adds layer and pins its popover ─────────────────────── */
   const handleAddLayer = useCallback((id: LayerId) => {
     if (allowDuplicateAdds) {
-      const term = buildLayerFormulaTerm(id, configs);
-      if (term) {
+      const tf = layerTf(id, configs);
+      const varName = LAYER_VAR[id];
+      if (tf && varName) {
         ensureLayerEnabled(id);
-        const base = normalizedCustom;
-        const next = base ? `${base} + ${term}` : term;
-        setCustomFormula(next);
-        setFormulaDraft(next);
+        const fn = tfFnName(tf);
+        const high = tf.ceiling ?? 1;
+        const newTerm: SimpleTerm = {
+          weight: 1,
+          fn,
+          varName,
+          M: tf.plateauEnd,
+          N: tf.decayEnd,
+          ...(high !== 1 || tf.floor !== 0 ? { high, low: tf.floor } : {}),
+        };
+
+        // Insert into the structural sum when possible, otherwise fall back
+        if (formulaSections) {
+          const next = buildFormulaFromSections({
+            ...formulaSections,
+            terms: [...formulaSections.terms, newTerm],
+          });
+          setCustomFormula(next);
+          setFormulaDraft(next);
+        } else {
+          const raw = buildLayerFormulaTerm(id, configs);
+          if (raw) {
+            const base = normalizedCustom;
+            const next = base ? `${base} + ${raw}` : raw;
+            setCustomFormula(next);
+            setFormulaDraft(next);
+          }
+        }
         setPinnedChip({ key: `layer:${id}`, layerId: id });
         return;
       }
@@ -1075,7 +1170,7 @@ export default function FormulaBar() {
     if (layer && !layer.enabled) toggleLayer(id);
     // Open editing popover for the newly added layer
     setPinnedChip({ key: `layer:${id}`, layerId: id });
-  }, [allowDuplicateAdds, configs, ensureLayerEnabled, layers, normalizedCustom, setCustomFormula, toggleLayer]);
+  }, [allowDuplicateAdds, buildFormulaFromSections, configs, ensureLayerEnabled, formulaSections, layers, normalizedCustom, setCustomFormula, toggleLayer]);
 
   /* ── Reverse lookup: variable name → LayerId ─────────────────── */
   const varToLayerId = useMemo(() => {
@@ -1083,6 +1178,19 @@ export default function FormulaBar() {
     for (const [id, varName] of Object.entries(LAYER_VAR)) m.set(varName, id as LayerId);
     return m;
   }, []);
+
+  /** Per-layer TF call count across the entire AST (for +N badges). */
+  const varTfCounts = useMemo(() => {
+    const m = new Map<LayerId, number>();
+    if (!visualAst) return m;
+    walkAst(visualAst, (node) => {
+      const tf = tfCallFromNode(node);
+      if (!tf) return;
+      const lid = varToLayerId.get(tf.varName);
+      if (lid) m.set(lid, (m.get(lid) ?? 0) + 1);
+    });
+    return m;
+  }, [visualAst, varToLayerId]);
 
   /* ── Context-menu handler (right-click on chip) ──────────────── */
   const handleChipContextMenu = useCallback((
@@ -1731,7 +1839,7 @@ export default function FormulaBar() {
   /* ── Sectioned formula renderer ──────────────────────────────── */
   const renderSectionedFormula = useMemo(() => {
     if (!formulaSections) return null;
-    const { guards, importantTerms, terms, totalWeight, extras } = formulaSections;
+    const { guards, importantTerms, terms, totalWeight, extras, wrapper } = formulaSections;
 
     // Extract guard info for rendering
     const guardInfos = guards.map(g => {
@@ -1747,26 +1855,11 @@ export default function FormulaBar() {
     const hasExtras = extras.length > 0;
     const hasImportant = importantTerms.length > 0;
     const hasSum = terms.length > 0;
+    const hasInner = hasExtras || hasImportant || hasSum;
 
-    return (
-      <span className="fb-ast-formula fb-sectioned">
-        {/* Guard section */}
-        {hasGuards && (
-          <span className="fb-section fb-section-guard">
-            {guardInfos.map((g, i) => (
-              <span key={`guard-${i}`} className="fb-section-item">
-                {i > 0 && <span className="fb-op fb-section-op">×</span>}
-                {renderGuardChip(g, `guard-${i}`, i)}
-              </span>
-            ))}
-          </span>
-        )}
-
-        {/* Section divider: guards × extras/important/sum */}
-        {hasGuards && (hasExtras || hasImportant || hasSum) && (
-          <span className="fb-section-divider">×</span>
-        )}
-
+    /* Inner content: everything the wrapper wraps (extras × important × sum/weights) */
+    const innerContent = hasInner ? (
+      <>
         {/* Extras section — arbitrary multiplicative factors from raw mode */}
         {hasExtras && (
           <span className="fb-section fb-section-extras">
@@ -1819,6 +1912,39 @@ export default function FormulaBar() {
               </>
             )}
           </span>
+        )}
+      </>
+    ) : null;
+
+    return (
+      <span className="fb-ast-formula fb-sectioned">
+        {/* Guard section */}
+        {hasGuards && (
+          <span className="fb-section fb-section-guard">
+            {guardInfos.map((g, i) => (
+              <span key={`guard-${i}`} className="fb-section-item">
+                {i > 0 && <span className="fb-op fb-section-op">×</span>}
+                {renderGuardChip(g, `guard-${i}`, i)}
+              </span>
+            ))}
+          </span>
+        )}
+
+        {/* Section divider: guards × wrapper/inner */}
+        {hasGuards && hasInner && (
+          <span className="fb-section-divider">×</span>
+        )}
+
+        {/* Wrapper (SQRT, ABS, LOG, …) around inner content */}
+        {wrapper && hasInner ? (
+          <span className="fb-section fb-section-wrapper">
+            <span className="fb-wrapper-fn">{wrapper.fn}</span>
+            <span className="fb-paren">(</span>
+            {innerContent}
+            <span className="fb-paren">)</span>
+          </span>
+        ) : (
+          innerContent
         )}
       </span>
     );
@@ -2032,6 +2158,7 @@ export default function FormulaBar() {
               allLayers={layers}
               onAdd={handleAddLayer}
               allowDuplicateAdds={allowDuplicateAdds}
+              varTfCounts={varTfCounts}
             />
           ) : (
             <span className="fb-raw-preview">

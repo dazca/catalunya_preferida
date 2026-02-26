@@ -328,9 +328,18 @@ export interface SimpleStructure {
   /** Arbitrary multiplicative factors that aren't guards, TF calls, or the sum body.
    *  E.g. a bare `2`, `sqrt(elevation)`, etc. added in raw mode. */
   extras: AstNode[];
+  /** Single-arg math function wrapping the non-guard portion, e.g. SQRT. */
+  wrapper?: { fn: string };
 }
 
 const TF_FNS = new Set(['SIN', 'INVSIN', 'RANGE', 'INVRANGE']);
+
+/** Single-arg math functions that can wrap the formula body and be safely unwrapped. */
+const WRAPPER_FNS = new Set([
+  'SQRT', 'ABS', 'LOG', 'LOG2', 'LOG10', 'EXP',
+  'SIGN', 'FLOOR', 'CEIL', 'ROUND',
+  'ACOS', 'ASIN', 'ATAN', 'COS', 'TAN',
+]);
 
 /** Check if a node is a `WEIGHT(n)` call. */
 function isWeightCall(node: AstNode): node is CallNode {
@@ -375,6 +384,38 @@ export function detectSimpleStructure(node: AstNode): SimpleStructure | null {
       guards.push(f as BinopNode);
     } else {
       nonGuardFactors.push(f);
+    }
+  }
+
+  // Unwrap single-arg math wrappers: e.g. SQRT(inner) → analyse inner content
+  let wrapper: { fn: string } | undefined;
+  if (
+    nonGuardFactors.length === 1 &&
+    nonGuardFactors[0].kind === 'call' &&
+    WRAPPER_FNS.has((nonGuardFactors[0] as CallNode).name) &&
+    (nonGuardFactors[0] as CallNode).args.length === 1
+  ) {
+    const wrapperCall = nonGuardFactors[0] as CallNode;
+    wrapper = { fn: wrapperCall.name };
+    let unwrapped = wrapperCall.args[0];
+
+    // Inner expression may have its own `/ weights`
+    if (unwrapped.kind === 'binop' && unwrapped.op === '/') {
+      if (unwrapped.right.kind === 'identifier' && (unwrapped.right as IdentNode).name === 'weights') {
+        totalWeight = -1;
+        unwrapped = unwrapped.left;
+      } else if (unwrapped.right.kind === 'number') {
+        totalWeight = (unwrapped.right as NumberNode).value;
+        unwrapped = unwrapped.left;
+      }
+    }
+
+    // Re-flatten the inner expression and re-classify
+    const innerFactors = flattenMul(unwrapped);
+    nonGuardFactors.length = 0;
+    for (const f of innerFactors) {
+      if (isComparison(f)) guards.push(f as BinopNode);
+      else nonGuardFactors.push(f);
     }
   }
 
@@ -485,7 +526,7 @@ export function detectSimpleStructure(node: AstNode): SimpleStructure | null {
     totalWeight = terms.reduce((acc, t) => acc + t.weight, 0);
   }
 
-  return { guards, importantTerms, terms, totalWeight, extras };
+  return { guards, importantTerms, terms, totalWeight, extras, wrapper };
 }
 
 /** Flatten a left-/right-associative addition tree into an ordered list. */
