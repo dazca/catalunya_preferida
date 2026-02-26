@@ -325,6 +325,9 @@ export interface SimpleStructure {
   importantTerms: SimpleTerm[];
   terms: SimpleTerm[];
   totalWeight: number;
+  /** Arbitrary multiplicative factors that aren't guards, TF calls, or the sum body.
+   *  E.g. a bare `2`, `sqrt(elevation)`, etc. added in raw mode. */
+  extras: AstNode[];
 }
 
 const TF_FNS = new Set(['SIN', 'INVSIN', 'RANGE', 'INVRANGE']);
@@ -381,6 +384,7 @@ export function detectSimpleStructure(node: AstNode): SimpleStructure | null {
 
   const importantTerms: SimpleTerm[] = [];
   const terms: SimpleTerm[] = [];
+  const extras: AstNode[] = [];
 
   if (sumIdx >= 0) {
     // ── Has addition → separate important terms from sum ──────────
@@ -394,12 +398,13 @@ export function detectSimpleStructure(node: AstNode): SimpleStructure | null {
         if (extracted) {
           importantTerms.push({ ...extracted, weight: 1 });
         } else {
-          return null;
+          extras.push(f);
         }
-      } else if (f.kind === 'number') {
-        // Numeric multiplier outside sum — ignore (e.g. stray "1")
+      } else if (f.kind === 'number' && (f as NumberNode).value === 1) {
+        // Stray "1" multiplier — ignore
       } else {
-        return null; // unrecognized factor
+        // Arbitrary factor (bare number, sqrt(...), etc.) — keep as extra
+        extras.push(f);
       }
     }
 
@@ -431,12 +436,17 @@ export function detectSimpleStructure(node: AstNode): SimpleStructure | null {
       if (f.kind === 'call' && TF_FNS.has(f.name)) tfIdxs.push(i);
     }
 
-    if (tfIdxs.length === 0) return null;
-
-    if (tfIdxs.length === 1) {
+    if (tfIdxs.length === 0) {
+      // No TF calls at all — everything is an extra factor
+      extras.push(...nonGuardFactors);
+    } else if (tfIdxs.length === 1) {
       const term = tryBuildTerm(nonGuardFactors);
-      if (!term) return null;
-      terms.push(term);
+      if (!term) {
+        // Couldn't parse as a term — push everything as extras
+        extras.push(...nonGuardFactors);
+      } else {
+        terms.push(term);
+      }
     } else {
       // Treat all TF calls before the last as important soft gates.
       const lastTfIdx = tfIdxs[tfIdxs.length - 1];
@@ -448,8 +458,11 @@ export function detectSimpleStructure(node: AstNode): SimpleStructure | null {
 
         if (isTf && i !== lastTfIdx) {
           const extracted = tryExtractTfCall(f as CallNode);
-          if (!extracted) return null;
-          importantTerms.push({ ...extracted, weight: 1 });
+          if (!extracted) {
+            extras.push(f);
+          } else {
+            importantTerms.push({ ...extracted, weight: 1 });
+          }
           continue;
         }
 
@@ -457,19 +470,22 @@ export function detectSimpleStructure(node: AstNode): SimpleStructure | null {
       }
 
       const term = tryBuildTerm(termFactors);
-      if (!term) return null;
-      terms.push(term);
+      if (!term) {
+        extras.push(...termFactors);
+      } else {
+        terms.push(term);
+      }
     }
   }
 
-  if (terms.length === 0 && importantTerms.length === 0) return null;
+  if (terms.length === 0 && importantTerms.length === 0 && extras.length === 0) return null;
 
   // Compute totalWeight from weight() calls if not set by explicit divisor
   if (totalWeight < 0) {
     totalWeight = terms.reduce((acc, t) => acc + t.weight, 0);
   }
 
-  return { guards, importantTerms, terms, totalWeight };
+  return { guards, importantTerms, terms, totalWeight, extras };
 }
 
 /** Flatten a left-/right-associative addition tree into an ordered list. */

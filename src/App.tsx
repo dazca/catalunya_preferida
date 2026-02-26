@@ -29,7 +29,6 @@ export default function App() {
     configs,
     view,
     customFormula,
-    formulaMode,
     analysisPoint,
     soloLayer,
     undo,
@@ -77,14 +76,16 @@ export default function App() {
    * because both paths are mathematically equivalent and the visual pipeline
    * handles missing data and edge-cases more robustly.
    * Only returns the formula string when the user has manually edited it.
+   *
+   * Mode-agnostic: a custom formula (e.g. with SQRT, bare multipliers)
+   * must be used for scoring even when displayed in visual mode.
    */
   const activeFormula = useMemo(() => {
-    if (formulaMode !== 'raw') return undefined;
     const trimmed = customFormula.trim();
     if (!trimmed) return undefined;
     if (trimmed === visualRawFormula.trim()) return undefined; // auto-generated — use visual pipeline
     return customFormula;
-  }, [formulaMode, customFormula, visualRawFormula]);
+  }, [customFormula, visualRawFormula]);
 
   /** Compute per-municipality scores */
   const allScores = useMemo(() => {

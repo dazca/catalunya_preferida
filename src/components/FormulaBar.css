@@ -271,6 +271,22 @@
   color: #9aa5c4;
 }
 
+/* Draggable number tokens — drag ↕ to adjust value */
+.fb-draggable-num {
+  cursor: ns-resize;
+  color: #e0e7ff;
+  background: rgba(129, 140, 248, 0.10);
+  border-radius: 3px;
+  padding: 0 3px;
+  border-bottom: 1px dashed rgba(129, 140, 248, 0.45);
+  user-select: none;
+  transition: background 0.15s;
+}
+.fb-draggable-num:hover {
+  background: rgba(129, 140, 248, 0.22);
+  border-bottom-color: rgba(129, 140, 248, 0.7);
+}
+
 .fb-ast-term {
   display: inline-flex;
   align-items: center;
@@ -446,6 +462,17 @@
 .fb-section-important {
   border-left: 2px solid rgba(251, 191, 36, 0.45);
   background: rgba(251, 191, 36, 0.04);
+}
+
+/* Extra factors — arbitrary expressions from raw mode (e.g. * 2, * sqrt(x)) */
+.fb-section-extras {
+  border-left: 2px solid rgba(168, 85, 247, 0.45);
+  background: rgba(168, 85, 247, 0.04);
+}
+
+.fb-extra-factor {
+  font-size: 11px;
+  color: #c4b5fd;
 }
 
 .fb-section-sum {

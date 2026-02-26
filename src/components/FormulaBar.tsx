@@ -158,17 +158,20 @@ function TfControls({
   onChange,
   rangeMax,
   unit,
+  canChangeTier = true,
 }: {
   label: string;
   ltc: LayerTransferConfig;
   onChange: (ltc: LayerTransferConfig) => void;
   rangeMax: number;
   unit: string;
+  canChangeTier?: boolean;
 }) {
   const t = useT();
   const tf = ltc.tf;
   const updateTf = (newTf: TransferFunction) => onChange({ ...ltc, tf: newTf });
   const shape = tf.shape ?? 'sin';
+  const tierDisabledTitle = canChangeTier ? undefined : 'Simplify raw formula first';
 
   return (
     <div className="fb-tf-controls">
@@ -192,13 +195,13 @@ function TfControls({
           ))}
         </div>
         <div className="fb-tf-flags">
-          <label className="fb-tf-flag" title="Required — disqualifies municipalities outside range">
-            <input type="checkbox" checked={tf.mandatory}
+          <label className="fb-tf-flag" title={tierDisabledTitle ?? "Required — disqualifies municipalities outside range"}>
+            <input type="checkbox" checked={tf.mandatory} disabled={!canChangeTier}
               onChange={(e) => updateTf({ ...tf, mandatory: e.target.checked, ...(e.target.checked ? { important: false } : {}) })} />
             <span className="fb-tf-flag-label">{t('tf.req')}</span>
           </label>
-          <label className="fb-tf-flag" title="Important — multiplicative soft gate outside the sum">
-            <input type="checkbox" checked={tf.important}
+          <label className="fb-tf-flag" title={tierDisabledTitle ?? "Important — multiplicative soft gate outside the sum"}>
+            <input type="checkbox" checked={tf.important} disabled={!canChangeTier}
               onChange={(e) => updateTf({ ...tf, important: e.target.checked, ...(e.target.checked ? { mandatory: false } : {}) })} />
             <span className="fb-tf-flag-label">Imp</span>
           </label>
@@ -257,7 +260,7 @@ function TfControls({
    inside the popover.
    ═══════════════════════════════════════════════════════════════════════ */
 
-function LayerEditorContent({ layerId }: { layerId: LayerId }) {
+function LayerEditorContent({ layerId, canChangeTier = true }: { layerId: LayerId; canChangeTier?: boolean }) {
   const { configs, updateConfig } = useAppStore();
   const t = useT();
 
@@ -265,11 +268,11 @@ function LayerEditorContent({ layerId }: { layerId: LayerId }) {
     case 'terrainSlope':
       return <TfControls label={t('fc.terrain.slope')} ltc={configs.terrain.slope}
         onChange={(ltc) => updateConfig('terrain', { ...configs.terrain, slope: ltc })}
-        rangeMax={60} unit="deg" />;
+        rangeMax={60} unit="deg" canChangeTier={canChangeTier} />;
     case 'terrainElevation':
       return <TfControls label={t('fc.terrain.elevation')} ltc={configs.terrain.elevation}
         onChange={(ltc) => updateConfig('terrain', { ...configs.terrain, elevation: ltc })}
-        rangeMax={3000} unit="m" />;
+        rangeMax={3000} unit="m" canChangeTier={canChangeTier} />;
     case 'terrainAspect':
       return (
         <div className="fb-tf-controls">
@@ -304,51 +307,51 @@ function LayerEditorContent({ layerId }: { layerId: LayerId }) {
           );
           updateConfig('votes', { terms });
         }}
-        rangeMax={100} unit="%" />;
+        rangeMax={100} unit="%" canChangeTier={canChangeTier} />;
     }
     case 'transit':
       return <TfControls label={t('fc.transit.dist')} ltc={configs.transit}
-        onChange={(ltc) => updateConfig('transit', ltc)} rangeMax={50} unit="km" />;
+        onChange={(ltc) => updateConfig('transit', ltc)} rangeMax={50} unit="km" canChangeTier={canChangeTier} />;
     case 'forest':
       return <TfControls label={t('fc.forest.cover')} ltc={configs.forest}
-        onChange={(ltc) => updateConfig('forest', ltc)} rangeMax={100} unit="%" />;
+        onChange={(ltc) => updateConfig('forest', ltc)} rangeMax={100} unit="%" canChangeTier={canChangeTier} />;
     case 'airQualityPm10':
       return <TfControls label={t('fc.airQuality.pm10')} ltc={configs.airQuality.pm10}
         onChange={(ltc) => updateConfig('airQuality', { ...configs.airQuality, pm10: ltc })}
-        rangeMax={100} unit="ug/m3" />;
+        rangeMax={100} unit="ug/m3" canChangeTier={canChangeTier} />;
     case 'airQualityNo2':
       return <TfControls label={t('fc.airQuality.no2')} ltc={configs.airQuality.no2}
         onChange={(ltc) => updateConfig('airQuality', { ...configs.airQuality, no2: ltc })}
-        rangeMax={100} unit="ug/m3" />;
+        rangeMax={100} unit="ug/m3" canChangeTier={canChangeTier} />;
     case 'crime':
       return <TfControls label={t('fc.crime.rate')} ltc={configs.crime}
-        onChange={(ltc) => updateConfig('crime', ltc)} rangeMax={100} unit="per 1k" />;
+        onChange={(ltc) => updateConfig('crime', ltc)} rangeMax={100} unit="per 1k" canChangeTier={canChangeTier} />;
     case 'healthcare':
       return <TfControls label={t('fc.healthcare.dist')} ltc={configs.healthcare}
-        onChange={(ltc) => updateConfig('healthcare', ltc)} rangeMax={50} unit="km" />;
+        onChange={(ltc) => updateConfig('healthcare', ltc)} rangeMax={50} unit="km" canChangeTier={canChangeTier} />;
     case 'schools':
       return <TfControls label={t('fc.schools.dist')} ltc={configs.schools}
-        onChange={(ltc) => updateConfig('schools', ltc)} rangeMax={30} unit="km" />;
+        onChange={(ltc) => updateConfig('schools', ltc)} rangeMax={30} unit="km" canChangeTier={canChangeTier} />;
     case 'internet':
       return <TfControls label={t('fc.internet.fiber')} ltc={configs.internet}
-        onChange={(ltc) => updateConfig('internet', ltc)} rangeMax={100} unit="%" />;
+        onChange={(ltc) => updateConfig('internet', ltc)} rangeMax={100} unit="%" canChangeTier={canChangeTier} />;
     case 'climateTemp':
       return <TfControls label={t('fc.climate.temp')} ltc={configs.climate.temperature}
         onChange={(ltc) => updateConfig('climate', { ...configs.climate, temperature: ltc })}
-        rangeMax={35} unit="C" />;
+        rangeMax={35} unit="C" canChangeTier={canChangeTier} />;
     case 'climateRainfall':
       return <TfControls label={t('fc.climate.rain')} ltc={configs.climate.rainfall}
         onChange={(ltc) => updateConfig('climate', { ...configs.climate, rainfall: ltc })}
-        rangeMax={1500} unit="mm" />;
+        rangeMax={1500} unit="mm" canChangeTier={canChangeTier} />;
     case 'rentalPrices':
       return <TfControls label={t('fc.rental.monthly')} ltc={configs.rentalPrices}
-        onChange={(ltc) => updateConfig('rentalPrices', ltc)} rangeMax={3000} unit="EUR" />;
+        onChange={(ltc) => updateConfig('rentalPrices', ltc)} rangeMax={3000} unit="EUR" canChangeTier={canChangeTier} />;
     case 'employment':
       return <TfControls label={t('fc.employment.unemployed')} ltc={configs.employment}
-        onChange={(ltc) => updateConfig('employment', ltc)} rangeMax={40} unit="%" />;
+        onChange={(ltc) => updateConfig('employment', ltc)} rangeMax={40} unit="%" canChangeTier={canChangeTier} />;
     case 'amenities':
       return <TfControls label={t('fc.amenities.dist')} ltc={configs.amenities}
-        onChange={(ltc) => updateConfig('amenities', ltc)} rangeMax={50} unit="km" />;
+        onChange={(ltc) => updateConfig('amenities', ltc)} rangeMax={50} unit="km" canChangeTier={canChangeTier} />;
     default:
       return null;
   }
@@ -364,6 +367,7 @@ function EditPopover({
   weightValue,
   pinned,
   duplicateCount,
+  canChangeTier = true,
   onPin,
   onClose,
   onRemove,
@@ -376,6 +380,7 @@ function EditPopover({
   weightValue: number;
   pinned: boolean;
   duplicateCount?: number;
+  canChangeTier?: boolean;
   onPin: () => void;
   onClose: () => void;
   onRemove: () => void;
@@ -473,7 +478,7 @@ function EditPopover({
 
       {/* Layer-specific controls */}
       <div className="fb-popover-body">
-        <LayerEditorContent layerId={layer.id} />
+        <LayerEditorContent layerId={layer.id} canChangeTier={canChangeTier} />
       </div>
     </div>
   );
@@ -785,8 +790,8 @@ export default function FormulaBar() {
   );
 
   const visualFormulaSource = useMemo(
-    () => (formulaMode === 'raw' ? normalizedCustom : '') || visualRawFormula,
-    [formulaMode, normalizedCustom, visualRawFormula],
+    () => normalizedCustom || visualRawFormula,
+    [normalizedCustom, visualRawFormula],
   );
 
   const visualAst = useMemo(() => {
@@ -813,10 +818,11 @@ export default function FormulaBar() {
     };
 
     const guardParts = sections.guards.map((g) => `(${serializeAst(g)})`);
+    const extraParts = sections.extras.map((e) => serializeAst(e));
     const importantParts = sections.importantTerms.map((t) => termToCall(t));
     const sumTerms = sections.terms.map((t) => `weight(${fmtN(t.weight)}) * ${termToCall(t)}`);
 
-    const factors: string[] = [...guardParts, ...importantParts];
+    const factors: string[] = [...guardParts, ...extraParts, ...importantParts];
     if (sumTerms.length > 0) {
       const sumExpr = sumTerms.length > 1 ? `(${sumTerms.join(' + ')})` : sumTerms[0];
       factors.push(sumExpr);
@@ -1563,7 +1569,19 @@ export default function FormulaBar() {
     }
 
     /* ── Generic AST nodes ── */
-    if (node.kind === 'number') return <span className="fb-ast-token" key={key}>{fmtN(node.value)}</span>;
+    if (node.kind === 'number') {
+      const numStep = Math.max(0.01, Math.abs(node.value) * 0.005);
+      return (
+        <span
+          className="fb-ast-token fb-draggable-num"
+          key={key}
+          title={`${fmtN(node.value)} — drag ↕ to adjust`}
+          onPointerDown={(e) => startDrag(e, node.value, (v) => patchAstNumber(node, parseFloat(v.toFixed(4))), numStep)}
+        >
+          {fmtN(node.value)}
+        </span>
+      );
+    }
     if (node.kind === 'identifier') return <span className="fb-ast-token" key={key}>{node.name}</span>;
     if (node.kind === 'unary') {
       return (
@@ -1713,7 +1731,7 @@ export default function FormulaBar() {
   /* ── Sectioned formula renderer ──────────────────────────────── */
   const renderSectionedFormula = useMemo(() => {
     if (!formulaSections) return null;
-    const { guards, importantTerms, terms, totalWeight } = formulaSections;
+    const { guards, importantTerms, terms, totalWeight, extras } = formulaSections;
 
     // Extract guard info for rendering
     const guardInfos = guards.map(g => {
@@ -1726,6 +1744,7 @@ export default function FormulaBar() {
     }).filter(Boolean) as { varName: string; op: string; value: number }[];
 
     const hasGuards = guardInfos.length > 0;
+    const hasExtras = extras.length > 0;
     const hasImportant = importantTerms.length > 0;
     const hasSum = terms.length > 0;
 
@@ -1743,8 +1762,25 @@ export default function FormulaBar() {
           </span>
         )}
 
-        {/* Section divider: guards × important/sum */}
-        {hasGuards && (hasImportant || hasSum) && (
+        {/* Section divider: guards × extras/important/sum */}
+        {hasGuards && (hasExtras || hasImportant || hasSum) && (
+          <span className="fb-section-divider">×</span>
+        )}
+
+        {/* Extras section — arbitrary multiplicative factors from raw mode */}
+        {hasExtras && (
+          <span className="fb-section fb-section-extras">
+            {extras.map((ex, i) => (
+              <span key={`extra-${i}`} className="fb-section-item fb-extra-factor">
+                {i > 0 && <span className="fb-op fb-section-op">×</span>}
+                {renderVisualNode(ex, `extra-${i}`)}
+              </span>
+            ))}
+          </span>
+        )}
+
+        {/* Section divider: extras × important/sum */}
+        {hasExtras && (hasImportant || hasSum) && (
           <span className="fb-section-divider">×</span>
         )}
 
@@ -1786,7 +1822,7 @@ export default function FormulaBar() {
         )}
       </span>
     );
-  }, [formulaSections, renderGuardChip, renderSimpleTerm]);
+  }, [formulaSections, renderGuardChip, renderSimpleTerm, renderVisualNode]);
 
   /* ── Close popover on outside click (hover or pinned) ────────── */
   useEffect(() => {
@@ -1860,6 +1896,7 @@ export default function FormulaBar() {
           weightValue={activeTermWeight ?? activeLayer.weight}
           pinned={!!pinnedChip}
           duplicateCount={activeDuplicateCount}
+          canChangeTier={!normalizedCustom || (!!formulaSections && formulaSections.extras.length === 0)}
           onPin={handlePopoverPin}
           onClose={handlePopoverClose}
           onRemove={handlePopoverRemove}
@@ -1934,7 +1971,7 @@ export default function FormulaBar() {
                   <button
                     className={`fb-formula-mode-btn ${formulaMode === 'raw' ? 'active' : ''}`}
                     onClick={() => {
-                      const raw = visualRawFormula;
+                      const raw = normalizedCustom || visualRawFormula;
                       setFormulaDraft(raw);
                       setCustomFormula(raw);
                       setFormulaMode('raw');
