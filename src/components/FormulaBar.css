@@ -439,6 +439,16 @@
   user-select: none;
 }
 
+/* ── Orientation chip (wind-rose) ───────────────────────────── */
+.fb-ori-chip {
+  gap: 4px;
+}
+.fb-ori-mini-rose {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
 /* ================================================================== */
 /*  Formula sections (guard / important / sum)                         */
 /* ================================================================== */

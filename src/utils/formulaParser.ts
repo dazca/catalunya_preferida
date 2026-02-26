@@ -315,6 +315,16 @@ export interface SimpleTerm {
   low?: number;
 }
 
+/** Describes a weighted ORIENTATION(var, S, SW, W, NW, N, NE, E, SE [, damp]) term. */
+export interface OrientationTerm {
+  weight: number;
+  varName: string;
+  /** Direction weights in canonical order: S, SW, W, NW, N, NE, E, SE. */
+  dirWeights: [number, number, number, number, number, number, number, number];
+  /** Dampening weight (default 1). */
+  dampWeight: number;
+}
+
 /**
  * Describes the "simple visual" formula structure:
  *   (guard₁) * (guard₂) * ... * imp₁ * imp₂ * ... * (term₁ + term₂ + ...) / totalWeight
@@ -324,6 +334,8 @@ export interface SimpleStructure {
   /** Important terms: bare TF calls acting as multiplicative soft-gates outside the sum. */
   importantTerms: SimpleTerm[];
   terms: SimpleTerm[];
+  /** Orientation (aspect wind-rose) terms within the weighted sum. */
+  orientationTerms: OrientationTerm[];
   totalWeight: number;
   /** Arbitrary multiplicative factors that aren't guards, TF calls, or the sum body.
    *  E.g. a bare `2`, `sqrt(elevation)`, etc. added in raw mode. */
@@ -333,6 +345,28 @@ export interface SimpleStructure {
 }
 
 const TF_FNS = new Set(['SIN', 'INVSIN', 'RANGE', 'INVRANGE']);
+
+/** Check if a call node is an ORIENTATION(...) call with 9-10 args. */
+function isOrientationCall(node: AstNode): node is CallNode {
+  return node.kind === 'call' && node.name === 'ORIENTATION' && node.args.length >= 9;
+}
+
+/** Extract OrientationTerm fields from an ORIENTATION(...) CallNode. */
+function tryExtractOrientation(node: CallNode): Omit<OrientationTerm, 'weight'> | null {
+  if (node.name !== 'ORIENTATION' || node.args.length < 9) return null;
+  if (node.args[0].kind !== 'identifier') return null;
+  const dirWeights: number[] = [];
+  for (let i = 1; i <= 8; i++) {
+    if (node.args[i].kind !== 'number') return null;
+    dirWeights.push((node.args[i] as NumberNode).value);
+  }
+  const dampWeight = node.args[9]?.kind === 'number' ? (node.args[9] as NumberNode).value : 1;
+  return {
+    varName: (node.args[0] as IdentNode).name,
+    dirWeights: dirWeights as [number, number, number, number, number, number, number, number],
+    dampWeight,
+  };
+}
 
 /** Single-arg math functions that can wrap the formula body and be safely unwrapped. */
 const WRAPPER_FNS = new Set([
@@ -425,6 +459,7 @@ export function detectSimpleStructure(node: AstNode): SimpleStructure | null {
 
   const importantTerms: SimpleTerm[] = [];
   const terms: SimpleTerm[] = [];
+  const orientationTerms: OrientationTerm[] = [];
   const extras: AstNode[] = [];
 
   if (sumIdx >= 0) {
@@ -474,12 +509,24 @@ export function detectSimpleStructure(node: AstNode): SimpleStructure | null {
         else rest.push(f);
       }
       guards.push(...localGuards.filter(g => !guards.some(eg => eg === g)));
+
+      // Try ORIENTATION term first, then regular TF term
+      const oriTerm = tryBuildOrientationTerm(rest);
+      if (oriTerm) {
+        orientationTerms.push(oriTerm);
+        continue;
+      }
       const term = tryBuildTerm(rest);
       if (!term) return null;
       terms.push(term);
     }
   } else {
     // ── No addition at top-level ───────────────────────────────────────
+    // Check for single ORIENTATION term first
+    const oriTerm = tryBuildOrientationTerm(nonGuardFactors);
+    if (oriTerm) {
+      orientationTerms.push(oriTerm);
+    } else {
     // We support two patterns:
     //   1) plain single term: weight(...) * FN(...)
     //   2) important * term:  FN(...) * weight(...) * FN(...)
@@ -530,16 +577,18 @@ export function detectSimpleStructure(node: AstNode): SimpleStructure | null {
         terms.push(term);
       }
     }
+    } // end else (non-orientation)
   }
 
-  if (terms.length === 0 && importantTerms.length === 0 && extras.length === 0) return null;
+  if (terms.length === 0 && importantTerms.length === 0 && orientationTerms.length === 0 && extras.length === 0) return null;
 
   // Compute totalWeight from weight() calls if not set by explicit divisor
   if (totalWeight < 0) {
-    totalWeight = terms.reduce((acc, t) => acc + t.weight, 0);
+    totalWeight = terms.reduce((acc, t) => acc + t.weight, 0)
+      + orientationTerms.reduce((acc, t) => acc + t.weight, 0);
   }
 
-  return { guards, importantTerms, terms, totalWeight, extras, wrapper };
+  return { guards, importantTerms, terms, orientationTerms, totalWeight, extras, wrapper };
 }
 
 /** Flatten a left-/right-associative addition tree into an ordered list. */
@@ -594,6 +643,33 @@ function tryBuildTerm(rest: AstNode[]): SimpleTerm | null {
   }
 
   const base = tryExtractTfCall(callNodes[0] as CallNode);
+  if (!base) return null;
+
+  return { ...base, weight };
+}
+
+/**
+ * Try to build an OrientationTerm from multiplication factors.
+ * Expects [WEIGHT(n)] * ORIENTATION(var, S, SW, W, NW, N, NE, E, SE [, damp]).
+ */
+function tryBuildOrientationTerm(rest: AstNode[]): OrientationTerm | null {
+  if (rest.length === 0) return null;
+
+  const oriNodes = rest.filter(isOrientationCall);
+  if (oriNodes.length !== 1) return null;
+
+  const weightCalls = rest.filter(isWeightCall);
+  const numberNodes = rest.filter((n) => n.kind === 'number');
+  const otherNodes = rest.filter((n) => n !== oriNodes[0] && !isWeightCall(n) && n.kind !== 'number');
+  if (otherNodes.length !== 0) return null;
+
+  let weight = 1;
+  for (const wc of weightCalls) weight *= weightValue(wc as CallNode);
+  if (weightCalls.length === 0) {
+    for (const n of numberNodes) weight *= (n as NumberNode).value;
+  }
+
+  const base = tryExtractOrientation(oriNodes[0] as CallNode);
   if (!base) return null;
 
   return { ...base, weight };

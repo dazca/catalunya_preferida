@@ -34,9 +34,66 @@ import type {
   LayerConfigs,
   TransferFunction,
   TfShape,
+  AspectPreferences,
   VoteMetric,
 } from '../types/transferFunction';
+import { scoreAspectAngle } from './transferFunction';
 import { POLITICAL_AXES, axisLayerId, axisIdFromLayerId } from './politicalAxes';
+
+/* ── Orientation (aspect wind-rose) helpers ──────────────────────────── */
+
+/** Canonical direction order used in ORIENTATION() formula function. */
+export const ORIENTATION_DIR_ORDER: readonly (keyof AspectPreferences)[] =
+  ['S', 'SW', 'W', 'NW', 'N', 'NE', 'E', 'SE'] as const;
+
+/**
+ * Build an ORIENTATION(...) call string from aspect preferences and
+ * dampening weight.
+ *
+ * Syntax: `ORIENTATION(aspect, S, SW, W, NW, N, NE, E, SE [, dampWeight])`
+ */
+export function buildOrientationCall(
+  varName: string,
+  prefs: AspectPreferences,
+  aspectWeight = 1,
+): string {
+  const args = [varName, ...ORIENTATION_DIR_ORDER.map(d => fmtNum(prefs[d]))];
+  if (Math.abs(aspectWeight - 1) > 1e-9) args.push(fmtNum(aspectWeight));
+  return `ORIENTATION(${args.join(', ')})`;
+}
+
+/**
+ * Parse ORIENTATION(...) args back into AspectPreferences + weight.
+ */
+export function parseOrientationArgs(
+  dirValues: number[],
+): { prefs: AspectPreferences; aspectWeight: number } {
+  const prefs: AspectPreferences = { N: 0.5, NE: 0.5, E: 0.5, SE: 0.5, S: 0.5, SW: 0.5, W: 0.5, NW: 0.5 };
+  for (let i = 0; i < 8 && i < dirValues.length; i++) {
+    prefs[ORIENTATION_DIR_ORDER[i]] = dirValues[i];
+  }
+  const aspectWeight = dirValues.length > 8 ? dirValues[8] : 1;
+  return { prefs, aspectWeight };
+}
+
+/**
+ * Runtime ORIENTATION function for per-municipality formula evaluation.
+ * `angleDeg` is the numeric aspect angle (0-360, -1=flat).
+ * The 8 direction weights are S,SW,W,NW,N,NE,E,SE.
+ * Optional 9th arg = dampening weight (default 1).
+ */
+function orientationFn(
+  angleDeg: number | string,
+  S: number, SW: number, W: number, NW: number,
+  N: number, NE: number, E: number, SE: number,
+  dampWeight?: number,
+): number {
+  const a = typeof angleDeg === 'string' ? 0 : angleDeg;
+  const prefs: AspectPreferences = { N, NE, E, SE, S, SW, W, NW };
+  const raw = scoreAspectAngle(a, prefs);
+  const dw = dampWeight ?? 1;
+  return 0.5 + (raw - 0.5) * dw;
+}
 
 /* ── Variable name mapping ──────────────────────────────────────────── */
 
@@ -218,8 +275,19 @@ export function visualToRawFormula(
     const varName = LAYER_VAR[layer.id];
     if (!varName) continue;
 
+    // Aspect → ORIENTATION(...) special call (no TF)
+    if (layer.id === 'terrainAspect') {
+      const varName = LAYER_VAR[layer.id];
+      if (!varName) continue;
+      const call = buildOrientationCall(varName, configs.terrain.aspect, configs.terrain.aspectWeight ?? 1);
+      const w = fmtNum(layer.weight);
+      terms.push(`weight(${w}) * ${call}`);
+      totalWeight += layer.weight;
+      continue;
+    }
+
     const tf = layerTf(layer.id, configs);
-    if (!tf) continue; // e.g. aspect — skip
+    if (!tf) continue;
 
     const shape = tf.shape ?? 'sin';
     const fn = SHAPE_FN[shape];
@@ -393,6 +461,13 @@ const BUILTIN_MATH: MathBuiltins = {
   PI:   Math.PI,
 };
 
+type OrientationFn = (
+  angleDeg: number | string,
+  S: number, SW: number, W: number, NW: number,
+  N: number, NE: number, E: number, SE: number,
+  dampWeight?: number,
+) => number;
+
 type CompiledFormulaFn = (
   VAR: (name: string) => number,
   SIN: TfFn,
@@ -400,6 +475,7 @@ type CompiledFormulaFn = (
   RANGE: TfFn,
   INVRANGE: TfFn,
   _M: MathBuiltins,
+  ORIENTATION: OrientationFn,
 ) => unknown;
 
 const COMPILED_CACHE = new Map<string, CompiledFormulaFn>();
@@ -465,6 +541,7 @@ function normalizeFormulaSource(formula: string): string {
   // Wrap bare identifiers with VAR("name") — skip reserved function names
   const reserved = new Set([
     'SIN', 'INVSIN', 'RANGE', 'INVRANGE', 'VAR', 'Math',
+    'ORIENTATION',
     'WEIGHT', 'weight', 'weights',
     'true', 'false', 'null', 'undefined',
     // Math builtins injected via _M destructuring
@@ -506,7 +583,7 @@ function getCompiledFormula(normalizedInput: string): CompiledFormulaFn {
     `var weights = ${weightsValue};`,
   ].join('\n');
   const compiled = new Function(
-    'VAR', 'SIN', 'INVSIN', 'RANGE', 'INVRANGE', '_M',
+    'VAR', 'SIN', 'INVSIN', 'RANGE', 'INVRANGE', '_M', 'ORIENTATION',
     `${preamble}\nreturn (${normalizedSource});`,
   ) as CompiledFormulaFn;
   COMPILED_CACHE.set(key, compiled);
@@ -530,7 +607,7 @@ export function validateCustomFormula(formula: string): FormulaValidationResult 
   try {
     const noop: TfFn = () => 0;
     const fn = getCompiledFormula(normalizedInput);
-    fn(() => 0, noop, noop, noop, noop, BUILTIN_MATH);
+    fn(() => 0, noop, noop, noop, noop, BUILTIN_MATH, orientationFn);
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : 'Invalid formula' };
@@ -575,12 +652,12 @@ export function compileFormulaForBatch(
   try {
     const noop: TfFn = () => 0;
     const fn = getCompiledFormula(normalizedInput);
-    fn(() => 0, noop, noop, noop, noop, BUILTIN_MATH); // validation dry-run
+    fn(() => 0, noop, noop, noop, noop, BUILTIN_MATH, orientationFn); // validation dry-run
     return (values: Record<string, number>): number => {
       try {
         const VAR = (name: string): number => values[normalizeName(name)] ?? 0;
         const { SIN, INVSIN, RANGE, INVRANGE } = buildRuntimeFns(values);
-        const output = fn(VAR, SIN, INVSIN, RANGE, INVRANGE, BUILTIN_MATH);
+        const output = fn(VAR, SIN, INVSIN, RANGE, INVRANGE, BUILTIN_MATH, orientationFn);
         const numeric = typeof output === 'boolean' ? (output ? 1 : 0) : Number(output);
         return clamp01(numeric);
       } catch { return 0; }
@@ -603,7 +680,7 @@ export function evaluateCustomFormula(formula: string, rawValues: FormulaValueMa
 
   try {
     const fn = getCompiledFormula(normalizedInput);
-    const output = fn(VAR, SIN, INVSIN, RANGE, INVRANGE, BUILTIN_MATH);
+    const output = fn(VAR, SIN, INVSIN, RANGE, INVRANGE, BUILTIN_MATH, orientationFn);
     const numeric = typeof output === 'boolean' ? (output ? 1 : 0) : Number(output);
     return clamp01(numeric);
   } catch {

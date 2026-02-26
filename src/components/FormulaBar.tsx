@@ -19,16 +19,17 @@ import { useT } from '../i18n';
 import type { Translations } from '../i18n';
 import type { LayerMeta, LayerId } from '../types';
 import type {
+  AspectPreferences,
   LayerConfigs,
   LayerTransferConfig,
   TransferFunction,
   TfShape,
   VoteMetric,
 } from '../types/transferFunction';
-import { validateCustomFormula, visualToRawFormula, LAYER_VAR, layerTf } from '../utils/formulaEngine';
+import { validateCustomFormula, visualToRawFormula, LAYER_VAR, layerTf, ORIENTATION_DIR_ORDER, buildOrientationCall } from '../utils/formulaEngine';
 import { normalizeUserFormulaInput } from '../utils/formulaEngine';
 import { parseFormula, serializeAst, walkAst, type AstNode, type CallNode } from '../utils/formulaParser';
-import { detectSimpleStructure, type SimpleStructure, type SimpleTerm } from '../utils/formulaParser';
+import { detectSimpleStructure, type SimpleStructure, type SimpleTerm, type OrientationTerm } from '../utils/formulaParser';
 import CurveEditor from './CurveEditor';
 import WindRoseEditor from './WindRoseEditor';
 import { POLITICAL_AXES, axisLayerId, axisIdFromLayerId, isAxisLayer } from '../utils/politicalAxes';
@@ -75,6 +76,27 @@ function tfFnName(tf: TransferFunction): 'SIN' | 'INVSIN' | 'RANGE' | 'INVRANGE'
     case 'invrange': return 'INVRANGE';
     default: return 'SIN';
   }
+}
+
+function orientationPrefsFromTerm(term: OrientationTerm): AspectPreferences {
+  return {
+    S: term.dirWeights[0],
+    SW: term.dirWeights[1],
+    W: term.dirWeights[2],
+    NW: term.dirWeights[3],
+    N: term.dirWeights[4],
+    NE: term.dirWeights[5],
+    E: term.dirWeights[6],
+    SE: term.dirWeights[7],
+  };
+}
+
+function orientationTermFromPrefs(base: OrientationTerm, prefs: AspectPreferences, dampWeight = base.dampWeight): OrientationTerm {
+  return {
+    ...base,
+    dirWeights: ORIENTATION_DIR_ORDER.map((d) => prefs[d]) as OrientationTerm['dirWeights'],
+    dampWeight,
+  };
 }
 
 function buildLayerFormulaTerm(id: LayerId, configs: LayerConfigs): string | null {
@@ -308,7 +330,19 @@ function TfControls({
    inside the popover.
    ═══════════════════════════════════════════════════════════════════════ */
 
-function LayerEditorContent({ layerId, canChangeTier = true, onTierChange }: { layerId: LayerId; canChangeTier?: boolean; onTierChange?: (tier: 'guard' | 'important' | 'sum') => void }) {
+function LayerEditorContent({
+  layerId,
+  canChangeTier = true,
+  onTierChange,
+  orientationOverride,
+  onOrientationChange,
+}: {
+  layerId: LayerId;
+  canChangeTier?: boolean;
+  onTierChange?: (tier: 'guard' | 'important' | 'sum') => void;
+  orientationOverride?: OrientationTerm | null;
+  onOrientationChange?: (next: OrientationTerm) => void;
+}) {
   const { configs, updateConfig } = useAppStore();
   const t = useT();
 
@@ -322,6 +356,22 @@ function LayerEditorContent({ layerId, canChangeTier = true, onTierChange }: { l
         onChange={(ltc) => updateConfig('terrain', { ...configs.terrain, elevation: ltc })}
         rangeMax={3000} unit="m" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     case 'terrainAspect':
+      {
+        const aspectPrefs = orientationOverride ? orientationPrefsFromTerm(orientationOverride) : configs.terrain.aspect;
+        const aspectWeight = orientationOverride ? orientationOverride.dampWeight : (configs.terrain.aspectWeight ?? 1);
+        const applyAspectPrefs = (aspect: AspectPreferences) => {
+          updateConfig('terrain', { ...configs.terrain, aspect });
+          if (orientationOverride) {
+            onOrientationChange?.(orientationTermFromPrefs(orientationOverride, aspect, aspectWeight));
+          }
+        };
+        const applyAspectWeight = (nextWeight: number) => {
+          const clamped = Math.max(0, nextWeight);
+          updateConfig('terrain', { ...configs.terrain, aspectWeight: clamped });
+          if (orientationOverride) {
+            onOrientationChange?.({ ...orientationOverride, dampWeight: clamped });
+          }
+        };
       return (
         <div className="fb-tf-controls">
           <div className="fb-tf-header">
@@ -329,15 +379,16 @@ function LayerEditorContent({ layerId, canChangeTier = true, onTierChange }: { l
             <label className="fb-tf-enabled">
               M
               <input type="number" min="0" max="3" step="0.1"
-                value={configs.terrain.aspectWeight}
-                onChange={(e) => updateConfig('terrain', { ...configs.terrain, aspectWeight: Math.max(0, +e.target.value) })}
+                value={aspectWeight}
+                onChange={(e) => applyAspectWeight(+e.target.value)}
                 style={{ width: 48 }} />
             </label>
           </div>
-          <WindRoseEditor prefs={configs.terrain.aspect}
-            onChange={(aspect) => updateConfig('terrain', { ...configs.terrain, aspect })} />
+          <WindRoseEditor prefs={aspectPrefs}
+            onChange={applyAspectPrefs} />
         </div>
       );
+      }
     case 'votesLeft':
     case 'votesRight':
     case 'votesIndep':
@@ -454,11 +505,12 @@ function EditPopover({
   layer,
   anchorRect,
   weightValue,
+  orientationOverride,
   pinned,
   duplicateCount,
   canChangeTier = true,
   onTierChange,
-  onPin,
+  onOrientationChange,
   onClose,
   onRemove,
   onWeightChange,
@@ -468,11 +520,12 @@ function EditPopover({
   layer: LayerMeta;
   anchorRect: DOMRect | null;
   weightValue: number;
+  orientationOverride?: OrientationTerm | null;
   pinned: boolean;
   duplicateCount?: number;
   canChangeTier?: boolean;
   onTierChange?: (tier: 'guard' | 'important' | 'sum') => void;
-  onPin: () => void;
+  onOrientationChange?: (next: OrientationTerm) => void;
   onClose: () => void;
   onRemove: () => void;
   onWeightChange?: (next: number) => void;
@@ -505,7 +558,6 @@ function EditPopover({
   return (
     <div className={`fb-popover ${pinned ? 'pinned' : ''}`}
       style={{ position: 'fixed', bottom: style.bottom, left: style.left, zIndex: 2400 }}
-      onClick={onPin}
       onMouseDown={(e) => e.stopPropagation()}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}>
@@ -569,7 +621,13 @@ function EditPopover({
 
       {/* Layer-specific controls */}
       <div className="fb-popover-body">
-        <LayerEditorContent layerId={layer.id} canChangeTier={canChangeTier} onTierChange={onTierChange} />
+        <LayerEditorContent
+          layerId={layer.id}
+          canChangeTier={canChangeTier}
+          onTierChange={onTierChange}
+          orientationOverride={orientationOverride}
+          onOrientationChange={onOrientationChange}
+        />
       </div>
     </div>
   );
@@ -957,10 +1015,20 @@ export default function FormulaBar() {
       return `${term.fn}(${term.varName}, ${args.join(', ')})`;
     };
 
+    const orientationToCall = (ot: OrientationTerm) => {
+      const dirArgs = ot.dirWeights.map(d => fmtN(d));
+      const args = [ot.varName, ...dirArgs];
+      if (Math.abs(ot.dampWeight - 1) > 1e-9) args.push(fmtN(ot.dampWeight));
+      return `ORIENTATION(${args.join(', ')})`;
+    };
+
     const guardParts = sections.guards.map((g) => `(${serializeAst(g)})`);
     const extraParts = sections.extras.map((e) => serializeAst(e));
     const importantParts = sections.importantTerms.map((t) => termToCall(t));
-    const sumTerms = sections.terms.map((t) => `weight(${fmtN(t.weight)}) * ${termToCall(t)}`);
+    const sumTerms = [
+      ...sections.terms.map((t) => `weight(${fmtN(t.weight)}) * ${termToCall(t)}`),
+      ...sections.orientationTerms.map((ot) => `weight(${fmtN(ot.weight)}) * ${orientationToCall(ot)}`),
+    ];
 
     // Build inner (non-guard) portion
     const innerFactors: string[] = [...extraParts, ...importantParts];
@@ -990,10 +1058,23 @@ export default function FormulaBar() {
     return Number.isFinite(idx) ? idx : null;
   }, [activeChipKey]);
 
+  const activeOrientationIndex = useMemo(() => {
+    if (!activeChipKey?.startsWith('ori-')) return null;
+    const idx = Number.parseInt(activeChipKey.slice(4), 10);
+    return Number.isFinite(idx) ? idx : null;
+  }, [activeChipKey]);
+
+  const activeOrientationTerm = useMemo(() => {
+    if (activeOrientationIndex == null || !formulaSections) return null;
+    return formulaSections.orientationTerms[activeOrientationIndex] ?? null;
+  }, [activeOrientationIndex, formulaSections]);
+
   const activeTermWeight = useMemo(() => {
-    if (activeSumIndex == null || !formulaSections) return null;
-    return formulaSections.terms[activeSumIndex]?.weight ?? null;
-  }, [activeSumIndex, formulaSections]);
+    if (!formulaSections) return null;
+    if (activeSumIndex != null) return formulaSections.terms[activeSumIndex]?.weight ?? null;
+    if (activeOrientationIndex != null) return formulaSections.orientationTerms[activeOrientationIndex]?.weight ?? null;
+    return null;
+  }, [activeOrientationIndex, activeSumIndex, formulaSections]);
 
   const duplicateTfLayers = useMemo(() => {
     if (!visualAst) return [] as { id: LayerId; count: number; icon: string; label: string }[];
@@ -1038,6 +1119,24 @@ export default function FormulaBar() {
   const handlePopoverWeightChange = useCallback((next: number) => {
     const clamped = Math.max(0, parseFloat(next.toFixed(2)));
 
+    if (normalizedCustom && formulaSections && activeOrientationIndex != null && formulaSections.orientationTerms[activeOrientationIndex]) {
+      const nextOri = formulaSections.orientationTerms.map((term, i) =>
+        i === activeOrientationIndex ? { ...term, weight: clamped } : term,
+      );
+      const nextFormula = buildFormulaFromSections({
+        ...formulaSections,
+        orientationTerms: nextOri,
+      });
+      setCustomFormula(nextFormula);
+      setFormulaDraft(nextFormula);
+
+      if (activeId && activeDuplicateCount <= 1) {
+        ensureLayerEnabled(activeId);
+        setLayerWeight(activeId, clamped);
+      }
+      return;
+    }
+
     if (normalizedCustom && formulaSections && activeSumIndex != null && formulaSections.terms[activeSumIndex]) {
       const nextTerms = formulaSections.terms.map((term, i) =>
         i === activeSumIndex ? { ...term, weight: clamped } : term,
@@ -1061,7 +1160,18 @@ export default function FormulaBar() {
       ensureLayerEnabled(activeId);
       setLayerWeight(activeId, clamped);
     }
-  }, [activeDuplicateCount, activeId, activeSumIndex, buildFormulaFromSections, ensureLayerEnabled, formulaSections, normalizedCustom, setCustomFormula, setLayerWeight, setFormulaDraft]);
+  }, [activeDuplicateCount, activeId, activeOrientationIndex, activeSumIndex, buildFormulaFromSections, ensureLayerEnabled, formulaSections, normalizedCustom, setCustomFormula, setLayerWeight, setFormulaDraft]);
+
+  const handleOrientationTermChange = useCallback((next: OrientationTerm) => {
+    if (!normalizedCustom || !formulaSections || activeOrientationIndex == null || !formulaSections.orientationTerms[activeOrientationIndex]) return;
+    const nextOri = formulaSections.orientationTerms.map((term, i) => (i === activeOrientationIndex ? next : term));
+    const nextFormula = buildFormulaFromSections({
+      ...formulaSections,
+      orientationTerms: nextOri,
+    });
+    setCustomFormula(nextFormula);
+    setFormulaDraft(nextFormula);
+  }, [activeOrientationIndex, buildFormulaFromSections, formulaSections, normalizedCustom, setCustomFormula]);
 
   const allowDuplicateAdds = formulaMode !== 'raw' && !!normalizedCustom;
 
@@ -1105,13 +1215,6 @@ export default function FormulaBar() {
     }
   }, [pinnedChip]);
 
-  const handlePopoverPin = useCallback(() => {
-    if (activeChip && !pinnedChip) {
-      setPinnedChip(activeChip);
-      setHoveredChip(null);
-    }
-  }, [activeChip, pinnedChip]);
-
   const handlePopoverClose = useCallback(() => {
     setPinnedChip(null);
     setHoveredChip(null);
@@ -1150,7 +1253,7 @@ export default function FormulaBar() {
 
     // ── Section-based removal (sum-N, imp-N, guard-N, extra-N) ──
     if (normalizedCustom && formulaSections && activeChipKey) {
-      const secMatch = activeChipKey.match(/^(sum|imp|guard|extra)-(\d+)/);
+      const secMatch = activeChipKey.match(/^(sum|imp|guard|extra|ori)-(\d+)/);
       if (secMatch) {
         const section = secMatch[1];
         const idx = parseInt(secMatch[2], 10);
@@ -1168,10 +1271,14 @@ export default function FormulaBar() {
           case 'extra':
             next = { ...formulaSections, extras: formulaSections.extras.filter((_, i) => i !== idx) };
             break;
+          case 'ori':
+            next = { ...formulaSections, orientationTerms: formulaSections.orientationTerms.filter((_, i) => i !== idx) };
+            break;
           default:
             return;
         }
-        next.totalWeight = next.terms.reduce((acc, t) => acc + t.weight, 0);
+        next.totalWeight = next.terms.reduce((acc, t) => acc + t.weight, 0)
+          + next.orientationTerms.reduce((acc, t) => acc + t.weight, 0);
         const nextFormula = buildFormulaFromSections(next);
         setCustomFormula(nextFormula);
         setFormulaDraft(nextFormula);
@@ -1188,6 +1295,11 @@ export default function FormulaBar() {
               if (tf && tf.varName === varName) { stillUsed = true; return; }
               const cmp = comparisonFromNode(node);
               if (cmp && cmp.varName === varName) stillUsed = true;
+              // Also check ORIENTATION calls
+              if (node.kind === 'call' && node.name === 'ORIENTATION' && node.args.length >= 9
+                && node.args[0].kind === 'identifier' && node.args[0].name === varName) {
+                stillUsed = true;
+              }
             });
             if (!stillUsed) {
               const layer = layers.find((l) => l.id === activeId);
@@ -1267,6 +1379,39 @@ export default function FormulaBar() {
   /* ── [+] adds layer and pins its popover ─────────────────────── */
   const handleAddLayer = useCallback((id: LayerId) => {
     if (allowDuplicateAdds) {
+      // Special case: aspect → ORIENTATION term
+      if (id === 'terrainAspect') {
+        const varName = LAYER_VAR[id];
+        if (varName) {
+          ensureLayerEnabled(id);
+          const prefs = configs.terrain.aspect;
+          const aw = configs.terrain.aspectWeight ?? 1;
+          const newOri: OrientationTerm = {
+            weight: 1,
+            varName,
+            dirWeights: ORIENTATION_DIR_ORDER.map(d => prefs[d]) as OrientationTerm['dirWeights'],
+            dampWeight: aw,
+          };
+          if (formulaSections) {
+            const next = buildFormulaFromSections({
+              ...formulaSections,
+              orientationTerms: [...formulaSections.orientationTerms, newOri],
+            });
+            setCustomFormula(next);
+            setFormulaDraft(next);
+          } else {
+            const call = buildOrientationCall(varName, prefs, aw);
+            const raw = `weight(1) * ${call}`;
+            const base = normalizedCustom;
+            const next = base ? `${base} + ${raw}` : raw;
+            setCustomFormula(next);
+            setFormulaDraft(next);
+          }
+          setPinnedChip({ key: `layer:${id}`, layerId: id });
+          return;
+        }
+      }
+
       const tf = layerTf(id, configs);
       const varName = LAYER_VAR[id];
       if (tf && varName) {
@@ -1414,6 +1559,7 @@ export default function FormulaBar() {
         guards: [...formulaSections.guards],
         importantTerms: [...formulaSections.importantTerms],
         terms: [...formulaSections.terms],
+        orientationTerms: [...formulaSections.orientationTerms],
         extras: [...formulaSections.extras],
       };
 
@@ -1575,6 +1721,7 @@ export default function FormulaBar() {
         guards: [...formulaSections.guards],
         importantTerms: [...formulaSections.importantTerms],
         terms: [...formulaSections.terms],
+        orientationTerms: [...formulaSections.orientationTerms],
         extras: [...formulaSections.extras],
       };
       let arr: unknown[] | null = null;
@@ -2252,10 +2399,84 @@ export default function FormulaBar() {
     );
   }, [activeChipKey, buildFormulaFromSections, dragReorder, dropTarget, formulaSections, handleChipClick, handleChipContextMenu, handleChipHover, handleChipLeave, layers, setCustomFormula, startChipDrag, varToLayerId]);
 
+  /* ── Render an orientation (wind-rose) chip ─────────────────── */
+  const renderOrientationChip = useCallback((ot: OrientationTerm, chipKey: string, idx: number) => {
+    const layerId = varToLayerId.get(ot.varName) ?? null;
+    const layer = layerId ? layers.find((l) => l.id === layerId) : null;
+    const isActive = activeChipKey === chipKey;
+    const isSolo = layerId != null && soloLayer === layerId;
+    const isDragging = dragReorder?.section === 'sum' && dragReorder?.fromIdx === (formulaSections ? formulaSections.terms.length + idx : idx);
+    const cls = `fb-chip fb-ori-chip${isActive ? ' active' : ''}${isSolo ? ' solo' : ''}${isDragging ? ' fb-chip-dragging' : ''}`;
+
+    /* Mini SVG wind-rose thumbnail (20×20) */
+    const miniRose = (() => {
+      const cx = 10, cy = 10, r = 8;
+      const dirs = ORIENTATION_DIR_ORDER; // S, SW, W, NW, N, NE, E, SE
+      // Angles: S=90°, SW=135°, W=180°, NW=225°, N=270°, NE=315°, E=0°, SE=45°
+      const angles = [Math.PI / 2, 3 * Math.PI / 4, Math.PI, 5 * Math.PI / 4, 3 * Math.PI / 2, 7 * Math.PI / 4, 0, Math.PI / 4];
+      const pts = dirs.map((_, i) => {
+        const w = ot.dirWeights[i];
+        const a = angles[i];
+        return `${cx + Math.cos(a) * r * w},${cy + Math.sin(a) * r * w}`;
+      });
+      return (
+        <svg width="20" height="20" viewBox="0 0 20 20" className="fb-ori-mini-rose">
+          <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--fb-muted)" strokeWidth="0.5" opacity="0.3" />
+          <polygon points={pts.join(' ')} fill="var(--fb-accent, #4fc3f7)" fillOpacity="0.4" stroke="var(--fb-accent, #4fc3f7)" strokeWidth="1" />
+        </svg>
+      );
+    })();
+
+    const title = `ORIENTATION(${ot.varName}, ${ot.dirWeights.map(d => fmtN(d)).join(', ')}${ot.dampWeight !== 1 ? `, ${fmtN(ot.dampWeight)}` : ''})`;
+
+    /* Weight-adjust callback */
+    const onWeightDrag = (v: number) => {
+      const clamped = Math.max(0, parseFloat(v.toFixed(2)));
+      if (layerId) { ensureLayerEnabled(layerId); setLayerWeight(layerId, clamped); }
+      if (formulaSections) {
+        const nextOri = formulaSections.orientationTerms.map((t, ti) =>
+          ti === idx ? { ...t, weight: clamped } : t,
+        );
+        const nextFormula = buildFormulaFromSections({ ...formulaSections, orientationTerms: nextOri });
+        setCustomFormula(nextFormula);
+        setFormulaDraft(nextFormula);
+      }
+    };
+
+    return (
+      <span
+        key={chipKey}
+        className={cls}
+        title={title}
+        ref={(el) => {
+          if (el) { chipRefs.current.set(chipKey, el); sectionChipRefs.current.set(`ori-${idx}`, el); }
+        }}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          const target = e.target as HTMLElement;
+          const isWeight = target.classList.contains('fb-chip-weight');
+          startChipDrag(e, 'sum', formulaSections ? formulaSections.terms.length + idx : idx,
+            isWeight ? ot.weight : undefined,
+            isWeight ? 0.01 : undefined,
+            isWeight ? onWeightDrag : undefined,
+          );
+        }}
+        onMouseEnter={() => layerId && handleChipHover(chipKey, layerId)}
+        onMouseLeave={handleChipLeave}
+        onClick={(e) => { e.stopPropagation(); layerId && handleChipClick(chipKey, layerId); }}
+        onContextMenu={(e) => layerId && handleChipContextMenu(e, chipKey, layerId, 'sum')}
+      >
+        <span className="fb-chip-weight" title={`weight(${fmtN(ot.weight)})`}>{fmtN(ot.weight)}</span>
+        <span className="fb-chip-icon">{layer?.icon ?? '🧭'}</span>
+        {miniRose}
+      </span>
+    );
+  }, [activeChipKey, buildFormulaFromSections, dragReorder, ensureLayerEnabled, formulaSections, handleChipClick, handleChipContextMenu, handleChipHover, handleChipLeave, layers, setCustomFormula, setFormulaDraft, setLayerWeight, soloLayer, startChipDrag, varToLayerId]);
+
   /* -- Sectioned formula renderer ------------------------------------------------ */
   const renderSectionedFormula = useMemo(() => {
     if (!formulaSections) return null;
-    const { guards, importantTerms, terms, totalWeight, extras, wrapper } = formulaSections;
+    const { guards, importantTerms, terms, orientationTerms, totalWeight, extras, wrapper } = formulaSections;
 
     // Extract guard info for rendering
     const guardInfos = guards.map(g => {
@@ -2270,7 +2491,8 @@ export default function FormulaBar() {
     const hasGuards = guardInfos.length > 0;
     const hasExtras = extras.length > 0;
     const hasImportant = importantTerms.length > 0;
-    const hasSum = terms.length > 0;
+    const hasOri = orientationTerms.length > 0;
+    const hasSum = terms.length > 0 || hasOri;
     const hasInner = hasExtras || hasImportant || hasSum;
 
     /* Inner content: everything the wrapper wraps (extras × important × sum/weights) */
@@ -2320,6 +2542,12 @@ export default function FormulaBar() {
               <span key={`sum-${i}`} className="fb-section-item">
                 {i > 0 && <span className="fb-op">+</span>}
                 {renderSimpleTerm(term, `sum-${i}`, 'sum', i)}
+              </span>
+            ))}
+            {orientationTerms.map((ot, i) => (
+              <span key={`ori-${i}`} className="fb-section-item">
+                {(terms.length > 0 || i > 0) && <span className="fb-op">+</span>}
+                {renderOrientationChip(ot, `ori-${i}`, i)}
               </span>
             ))}
             <span className="fb-paren">)</span>
@@ -2410,7 +2638,7 @@ export default function FormulaBar() {
         )}
       </span>
     );
-  }, [dragReorder, dropTarget, formulaSections, isMathMode, renderGuardChip, renderSimpleTerm, renderVisualNode]);
+  }, [dragReorder, dropTarget, formulaSections, isMathMode, renderGuardChip, renderOrientationChip, renderSimpleTerm, renderVisualNode]);
 
   /* ── Close popover on outside click (hover or pinned) ────────── */
   useEffect(() => {
@@ -2482,11 +2710,12 @@ export default function FormulaBar() {
           layer={activeLayer}
           anchorRect={popoverRect}
           weightValue={activeTermWeight ?? activeLayer.weight}
+          orientationOverride={activeId === 'terrainAspect' ? activeOrientationTerm : null}
           pinned={!!pinnedChip}
           duplicateCount={activeDuplicateCount}
           canChangeTier={!normalizedCustom || (!!formulaSections && formulaSections.extras.length === 0)}
           onTierChange={activeChipKey ? (tier) => handleTierChange(activeLayer.id, activeChipKey, tier) : undefined}
-          onPin={handlePopoverPin}
+          onOrientationChange={handleOrientationTermChange}
           onClose={handlePopoverClose}
           onRemove={handlePopoverRemove}
           onWeightChange={handlePopoverWeightChange}
