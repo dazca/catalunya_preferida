@@ -36,7 +36,7 @@ export interface TransferFunction {
   /** If true, this layer is required — municipality is disqualified if score = floor. */
   mandatory: boolean;
   /** If true, the TF value is placed as a multiplicative factor outside the sum (soft gate 0-1). */
-  important: boolean;
+  important?: boolean;
   /** Weight multiplier (default 1.0). Scales this layer's contribution. */
   multiplier: number;
   /**

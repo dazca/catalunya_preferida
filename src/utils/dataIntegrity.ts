@@ -449,8 +449,9 @@ function checkCrossLayerCorrelation(
   ];
 
   for (const [layerA, layerB, keyA, keyB] of layerPairs) {
-    const codesA = new Set(Object.keys((data as Record<string, Record<string, unknown>>)[keyA] ?? {}));
-    const codesB = new Set(Object.keys((data as Record<string, Record<string, unknown>>)[keyB] ?? {}));
+    const tables = data as unknown as Record<string, Record<string, unknown>>;
+    const codesA = new Set(Object.keys(tables[keyA] ?? {}));
+    const codesB = new Set(Object.keys(tables[keyB] ?? {}));
     const inANotB: string[] = [];
     const inBNotA: string[] = [];
     for (const c of codesA) if (!codesB.has(c) && municipalityCodes.has(c)) inANotB.push(c);
@@ -481,7 +482,7 @@ function checkBrokenReferences(
   ];
 
   for (const [layer, key] of layerKeys) {
-    const table = (data as Record<string, Record<string, unknown>>)[key] ?? {};
+    const table = (data as unknown as Record<string, Record<string, unknown>>)[key] ?? {};
     const orphans: string[] = [];
     for (const codi of Object.keys(table)) {
       if (!municipalityCodes.has(codi)) orphans.push(codi);

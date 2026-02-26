@@ -32,7 +32,7 @@ import { parseFormula, serializeAst, walkAst, type AstNode, type CallNode } from
 import { detectSimpleStructure, type SimpleStructure, type SimpleTerm, type OrientationTerm } from '../utils/formulaParser';
 import CurveEditor from './CurveEditor';
 import WindRoseEditor from './WindRoseEditor';
-import { POLITICAL_AXES, axisLayerId, axisIdFromLayerId, isAxisLayer } from '../utils/politicalAxes';
+import { POLITICAL_AXES, axisLayerId, axisIdFromLayerId } from '../utils/politicalAxes';
 import './FormulaBar.css';
 
 /** Mapping from vote sub-layer IDs to their VoteMetric key. */
@@ -56,12 +56,6 @@ const VOTE_ID_TO_METRIC: Record<string, VoteMetric> = {
   votesCiU: 'ciuPct',
   votesOtherParties: 'otherPartiesPct',
 };
-
-/** Set of party-layer IDs (use partyVotes.terms instead of votes.terms). */
-const PARTY_LAYER_IDS = new Set<string>([
-  'votesERC','votesCUP','votesPODEM','votesJUNTS','votesCOMUNS',
-  'votesPP','votesVOX','votesPSC','votesCs','votesPDeCAT','votesCiU','votesOtherParties',
-]);
 
 const TF_FN_NAMES = new Set(['SIN', 'INVSIN', 'RANGE', 'INVRANGE']);
 

@@ -372,17 +372,6 @@ export function renderHeatmapImage(
     }
   }
 
-  // ── Normalise to local min/max for maximum colour contrast ─────────
-  let minScore = Infinity;
-  let maxScore = -Infinity;
-  for (let i = 0; i < cellScores.length; i++) {
-    const v = cellScores[i];
-    if (v < 0) continue;
-    if (v < minScore) minScore = v;
-    if (v > maxScore) maxScore = v;
-  }
-  const span = Math.max(0.0001, maxScore - minScore);
-
   // ── Paint pixels ───────────────────────────────────────────────────
   const canvas = document.createElement('canvas');
   canvas.width  = cols;
@@ -412,8 +401,7 @@ export function renderHeatmapImage(
       continue;
     }
 
-    const normalized = span < 0.02 ? 0.5 : (raw - minScore) / span;
-    const [r, g, b, a] = scoreToRgba(normalized, 210);
+    const [r, g, b, a] = scoreToRgba(raw, 210);
     pixels[off]     = r;
     pixels[off + 1] = g;
     pixels[off + 2] = b;

@@ -25,7 +25,7 @@ export default function MunicipalityDeepDive({ codi, nom, municipalityData, repo
     const result: Array<{ layer: string; fields: FieldInfo[] }> = [];
 
     // Votes
-    const votes = municipalityData.votes[codi] as Record<string, unknown> | undefined;
+    const votes = municipalityData.votes[codi] as unknown as Record<string, unknown> | undefined;
     result.push({
       layer: 'Votes',
       fields: [
@@ -39,7 +39,7 @@ export default function MunicipalityDeepDive({ codi, nom, municipalityData, repo
     });
 
     // Terrain
-    const terrain = municipalityData.terrain[codi] as Record<string, unknown> | undefined;
+    const terrain = municipalityData.terrain[codi] as unknown as Record<string, unknown> | undefined;
     result.push({
       layer: 'Terrain',
       fields: [
@@ -50,7 +50,7 @@ export default function MunicipalityDeepDive({ codi, nom, municipalityData, repo
     });
 
     // Forest
-    const forest = municipalityData.forest[codi] as Record<string, unknown> | undefined;
+    const forest = municipalityData.forest[codi] as unknown as Record<string, unknown> | undefined;
     result.push({
       layer: 'Forest',
       fields: [
@@ -61,7 +61,7 @@ export default function MunicipalityDeepDive({ codi, nom, municipalityData, repo
     });
 
     // Crime
-    const crime = municipalityData.crime[codi] as Record<string, unknown> | undefined;
+    const crime = municipalityData.crime[codi] as unknown as Record<string, unknown> | undefined;
     result.push({
       layer: 'Crime',
       fields: [
@@ -71,7 +71,7 @@ export default function MunicipalityDeepDive({ codi, nom, municipalityData, repo
     });
 
     // Rental Prices
-    const rental = municipalityData.rentalPrices[codi] as Record<string, unknown> | undefined;
+    const rental = municipalityData.rentalPrices[codi] as unknown as Record<string, unknown> | undefined;
     result.push({
       layer: 'Rental Prices',
       fields: [
@@ -81,7 +81,7 @@ export default function MunicipalityDeepDive({ codi, nom, municipalityData, repo
     });
 
     // Employment
-    const empl = municipalityData.employment[codi] as Record<string, unknown> | undefined;
+    const empl = municipalityData.employment[codi] as unknown as Record<string, unknown> | undefined;
     result.push({
       layer: 'Employment',
       fields: [
@@ -92,7 +92,7 @@ export default function MunicipalityDeepDive({ codi, nom, municipalityData, repo
     });
 
     // Internet
-    const internet = municipalityData.internet[codi] as Record<string, unknown> | undefined;
+    const internet = municipalityData.internet[codi] as unknown as Record<string, unknown> | undefined;
     result.push({
       layer: 'Internet',
       fields: [
@@ -102,7 +102,7 @@ export default function MunicipalityDeepDive({ codi, nom, municipalityData, repo
     });
 
     // Air Quality
-    const air = municipalityData.airQuality[codi] as Record<string, unknown> | undefined;
+    const air = municipalityData.airQuality[codi] as unknown as Record<string, unknown> | undefined;
     result.push({
       layer: 'Air Quality',
       fields: [

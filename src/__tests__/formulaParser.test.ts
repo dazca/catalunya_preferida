@@ -11,7 +11,7 @@ import {
   evaluateCustomFormula,
   visualToRawFormula,
 } from '../utils/formulaEngine';
-import { DEFAULT_LAYER_CONFIGS, defaultTf } from '../types/transferFunction';
+import { DEFAULT_LAYER_CONFIGS } from '../types/transferFunction';
 import type { LayerMeta } from '../types';
 
 /* ── formulaParser ─────────────────────────────────────────────────── */

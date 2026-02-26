@@ -18,7 +18,7 @@ import {
   scoreAspectAngle,
 } from './transferFunction';
 import { evaluateCustomFormula } from './formulaEngine';
-import { POLITICAL_AXES, axisLayerId, axisIdFromLayerId, computeAxisScore } from './politicalAxes';
+import { POLITICAL_AXES, axisLayerId, computeAxisScore } from './politicalAxes';
 import type {
   VoteSentiment,
   TerrainStats,

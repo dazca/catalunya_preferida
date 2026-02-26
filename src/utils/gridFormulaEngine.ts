@@ -453,10 +453,9 @@ export function scoreGridToRGBA(
   disqualifiedMask: 'black' | 'transparent',
 ): Uint8ClampedArray {
 
-  const { scores, minScore, maxScore } = result;
+  const { scores } = result;
   const n = scores.length;
   const pixels = new Uint8ClampedArray(n * 4);
-  const span = Math.max(0.0001, maxScore - minScore);
 
   for (let i = 0; i < n; i++) {
     const off = i * 4;
@@ -481,8 +480,7 @@ export function scoreGridToRGBA(
       continue;
     }
 
-    const normalized = span < 0.02 ? 0.5 : (raw - minScore) / span;
-    const [r, g, b, a] = scoreToRgba(normalized, 210);
+    const [r, g, b, a] = scoreToRgba(raw, 210);
     pixels[off]     = r;
     pixels[off + 1] = g;
     pixels[off + 2] = b;

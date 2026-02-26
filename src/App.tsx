@@ -149,14 +149,38 @@ export default function App() {
 
   /** Called by MapContainer whenever the map is panned or zoomed. */
   const handleViewportChange = useCallback(
-    (w: number, s: number, e: number, n: number, zoom: number) => {
+    (_w: number, _s: number, _e: number, _n: number, zoom: number) => {
       if (viewportDebounce.current) clearTimeout(viewportDebounce.current);
       viewportDebounce.current = setTimeout(() => {
-        setViewportSpec(viewportSpecForZoom(w, s, e, n, zoom));
-        setGridSpec(gridViewportSpecForZoom(w, s, e, n, zoom) as ViewportSpec);
+        // Always render over full Catalonia bounds to avoid partial overlays
+        // when map pitch/bearing alters visible viewport bounds.
+        setViewportSpec(
+          viewportSpecForZoom(
+            CATALONIA_VIEWPORT.w,
+            CATALONIA_VIEWPORT.s,
+            CATALONIA_VIEWPORT.e,
+            CATALONIA_VIEWPORT.n,
+            zoom,
+          ),
+        );
+        setGridSpec(
+          gridViewportSpecForZoom(
+            CATALONIA_VIEWPORT.w,
+            CATALONIA_VIEWPORT.s,
+            CATALONIA_VIEWPORT.e,
+            CATALONIA_VIEWPORT.n,
+            zoom,
+          ) as ViewportSpec,
+        );
         // Demand-load fine DEM tiles for this viewport
         const targetM = Math.max(80, Math.min(3000, Math.round(15_000 / Math.pow(2, zoom - 8))));
-        loadViewportTiles(w, s, e, n, targetM).then((anyNew) => {
+        loadViewportTiles(
+          CATALONIA_VIEWPORT.w,
+          CATALONIA_VIEWPORT.s,
+          CATALONIA_VIEWPORT.e,
+          CATALONIA_VIEWPORT.n,
+          targetM,
+        ).then((anyNew) => {
           if (anyNew) setDemFineTileVersion((v) => v + 1);
         });
       }, 600);

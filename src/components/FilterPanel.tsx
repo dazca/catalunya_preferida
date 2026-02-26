@@ -224,6 +224,18 @@ const METRIC_LABELS: Record<VoteMetric, string> = {
   independencePct: 'Indep %',
   unionistPct: 'Unionist %',
   turnoutPct: 'Turnout %',
+  ercPct: 'ERC %',
+  cupPct: 'CUP %',
+  podemPct: 'Podem %',
+  juntsPct: 'Junts %',
+  comunsPct: 'Comuns %',
+  ppPct: 'PP %',
+  voxPct: 'VOX %',
+  pscPct: 'PSC %',
+  csPct: 'Cs %',
+  pdecatPct: 'PDeCAT %',
+  ciuPct: 'CiU %',
+  otherPartiesPct: 'Other parties %',
 };
 
 function VoteTermsEditor({
@@ -241,7 +253,7 @@ function VoteTermsEditor({
     const id = `v${Date.now()}`;
     onChange([
       ...terms,
-      { id, metric: next.metric, value: { enabled: true, tf: { plateauEnd: 0, decayEnd: 100, floor: 0, mandatory: false, multiplier: 1, shape: 'sin' } } },
+      { id, metric: next.metric, value: { enabled: true, tf: { plateauEnd: 0, decayEnd: 100, floor: 0, mandatory: false, important: false, multiplier: 1, shape: 'sin' } } },
     ]);
   };
 

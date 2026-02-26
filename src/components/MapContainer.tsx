@@ -273,6 +273,7 @@ export default function MapContainer({
           paint: {
             'raster-opacity': v.showHeatmap ? v.heatmapOpacity : 0,
             'raster-fade-duration': 0,
+            'raster-resampling': 'nearest',
           },
           layout: { visibility: v.showHeatmap ? 'visible' : 'none' },
         },
