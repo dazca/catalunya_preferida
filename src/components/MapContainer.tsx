@@ -146,15 +146,41 @@ export default function MapContainer({
   const pointAnalysisModeRef = useRef(pointAnalysisMode);
   useEffect(() => { pointAnalysisModeRef.current = pointAnalysisMode; }, [pointAnalysisMode]);
 
+  /** Bucketed native basemap layer IDs, populated on style load. */
+  const roadLayerIdsRef = useRef<string[]>([]);
+  const labelLayerIdsRef = useRef<string[]>([]);
+  const poiLayerIdsRef = useRef<string[]>([]);
+  const otherBasemapLayerIdsRef = useRef<string[]>([]);
+
   /* ---------------------------------------------------------------- */
   /*  Map initialisation (runs once)                                  */
   /* ---------------------------------------------------------------- */
   const initMap = useCallback(() => {
     if (!containerRef.current || mapRef.current) return;
+    void (async () => {
+      /**
+       * Fetch and patch the ICGC style JSON, raising maxzoom on every tile
+       * source so MapLibre stretches (overzooms) the last available tile
+       * rather than rendering a black canvas at high zoom levels.
+       */
+      let patchedStyle: string | object = ICGC_BASEMAP;
+      try {
+        const resp = await fetch(ICGC_BASEMAP);
+        const json = await resp.json() as Record<string, unknown>;
+        const sources = (json.sources ?? {}) as Record<string, Record<string, unknown>>;
+        for (const src of Object.values(sources)) {
+          if (src.type === 'raster' || src.type === 'vector' || src.type === 'raster-dem') {
+            src.maxzoom = Math.max(Number(src.maxzoom ?? 0), 19);
+          }
+        }
+        patchedStyle = json;
+      } catch { /* fall back to URL-based loading */ }
+      if (!containerRef.current || mapRef.current) return;
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: ICGC_BASEMAP,
+      style: patchedStyle as maplibregl.StyleSpecification,
+      maxZoom: 22,
       center: CATALONIA_CENTER,
       zoom: 8,
       pitch: 50,
@@ -178,6 +204,35 @@ export default function MapContainer({
     map.on('load', () => {
       loadedRef.current = true;
       const v = viewRef.current;
+
+      // Scan native basemap layers into buckets BEFORE adding our custom layers.
+      // This lets us toggle roads/labels/POIs independently via the gear panel.
+      const _vis = (on: boolean): 'visible' | 'none' => on ? 'visible' : 'none';
+      roadLayerIdsRef.current = [];
+      labelLayerIdsRef.current = [];
+      poiLayerIdsRef.current = [];
+      otherBasemapLayerIdsRef.current = [];
+      for (const layer of map.getStyle().layers ?? []) {
+        const lo = (layer as { layout?: Record<string, unknown> }).layout ?? {};
+        const hasIcon = lo['icon-image'] != null;
+        const hasText = lo['text-field'] != null;
+        try {
+          if (layer.type === 'line') {
+            roadLayerIdsRef.current.push(layer.id);
+            map.setLayoutProperty(layer.id, 'visibility', _vis(v.showBasemap && v.showRoads));
+          } else if (layer.type === 'symbol' && hasIcon) {
+            poiLayerIdsRef.current.push(layer.id);
+            map.setLayoutProperty(layer.id, 'visibility', _vis(v.showBasemap && v.showPOI));
+          } else if (layer.type === 'symbol' && hasText) {
+            labelLayerIdsRef.current.push(layer.id);
+            map.setLayoutProperty(layer.id, 'visibility', _vis(v.showBasemap && v.showLabels));
+          } else {
+            otherBasemapLayerIdsRef.current.push(layer.id);
+            map.setLayoutProperty(layer.id, 'visibility', _vis(v.showBasemap));
+          }
+        } catch { /* layer may not support visibility */ }
+      }
+
       const style = map.getStyle();
       const insertBefore = findFirstSymbolLayer(map);
 
@@ -447,6 +502,7 @@ export default function MapContainer({
       console.log('[MapContainer] WebGL context restored — triggering repaint');
       map.triggerRepaint();
     });
+    })(); // end async IIFE
   }, [selectMunicipality]);
 
   /* -- Init / cleanup -- */
@@ -530,6 +586,20 @@ export default function MapContainer({
     if (!map || !loadedRef.current) return;
 
     const vis = (on: boolean) => (on ? 'visible' : 'none') as 'visible' | 'none';
+
+    // Basemap layer toggles (roads, labels, POIs, background fills)
+    for (const id of roadLayerIdsRef.current) {
+      try { map.setLayoutProperty(id, 'visibility', vis(view.showBasemap && view.showRoads)); } catch { /* */ }
+    }
+    for (const id of labelLayerIdsRef.current) {
+      try { map.setLayoutProperty(id, 'visibility', vis(view.showBasemap && view.showLabels)); } catch { /* */ }
+    }
+    for (const id of poiLayerIdsRef.current) {
+      try { map.setLayoutProperty(id, 'visibility', vis(view.showBasemap && view.showPOI)); } catch { /* */ }
+    }
+    for (const id of otherBasemapLayerIdsRef.current) {
+      try { map.setLayoutProperty(id, 'visibility', vis(view.showBasemap)); } catch { /* */ }
+    }
 
     // Borders
     if (map.getLayer('municipalities-line'))

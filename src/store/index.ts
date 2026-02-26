@@ -51,6 +51,16 @@ export interface ViewSettings {
   heatmapOpacity: number;
   /** Paint mandatory-disqualified zones in black instead of transparent. */
   maskDisqualifiedAsBlack: boolean;
+  /** Show/hide the entire basemap (roads, labels, POIs, fills). */
+  showBasemap: boolean;
+  /** Show/hide road and path line layers. */
+  showRoads: boolean;
+  /** Show/hide place-name text label layers. */
+  showLabels: boolean;
+  /** Show/hide point-of-interest icon layers. */
+  showPOI: boolean;
+  /** Use WebGPU compute shaders for heatmap rendering when available. */
+  useGpuRendering: boolean;
 }
 
 export const DEFAULT_VIEW: ViewSettings = {
@@ -63,6 +73,11 @@ export const DEFAULT_VIEW: ViewSettings = {
   terrainExaggeration: 1.5,
   heatmapOpacity: 0.75,
   maskDisqualifiedAsBlack: true,
+  showBasemap: true,
+  showRoads: true,
+  showLabels: true,
+  showPOI: true,
+  useGpuRendering: true,
 };
 
 export interface DataIntegritySuggestion {
@@ -416,7 +431,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'better-idealista-config',
-      version: 11,
+      version: 12,
       // Persist everything except transient UI state
       partialize: (state) => ({
         layers: state.layers,
@@ -700,6 +715,15 @@ export const useAppStore = create<AppState>()(
           if (typeof state.integrityLastSignature !== 'string') {
             state.integrityLastSignature = null;
           }
+        }
+
+        // ── v11 → v12: add GPU rendering toggle ─────────────────
+        if (version < 12) {
+          const view = (state.view as Record<string, unknown> | undefined) ?? {};
+          if (typeof view.useGpuRendering !== 'boolean') {
+            view.useGpuRendering = true;
+          }
+          state.view = { ...DEFAULT_VIEW, ...view };
         }
 
         return state as unknown as AppState;

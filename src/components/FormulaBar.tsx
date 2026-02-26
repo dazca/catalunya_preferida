@@ -33,6 +33,7 @@ import { detectSimpleStructure, type SimpleStructure, type SimpleTerm, type Orie
 import CurveEditor from './CurveEditor';
 import WindRoseEditor from './WindRoseEditor';
 import { POLITICAL_AXES, axisLayerId, axisIdFromLayerId } from '../utils/politicalAxes';
+import { isWebGPUAvailable } from '../utils/gpuRenderer';
 import './FormulaBar.css';
 
 /** Mapping from vote sub-layer IDs to their VoteMetric key. */
@@ -838,6 +839,32 @@ function ViewMenuDropdown({ anchorRef }: { anchorRef: React.RefObject<HTMLDivEle
       <div className="fb-view-title">Map Settings</div>
 
       <div className="fb-view-section">
+        <span className="fb-view-section-label">Basemap</span>
+        <label className="fb-view-toggle">
+          <input type="checkbox" checked={view.showBasemap}
+            onChange={(e) => setView({ showBasemap: e.target.checked })} />
+          <span>Show map</span>
+        </label>
+        {view.showBasemap && (<>
+          <label className="fb-view-toggle">
+            <input type="checkbox" checked={view.showRoads}
+              onChange={(e) => setView({ showRoads: e.target.checked })} />
+            <span>Roads</span>
+          </label>
+          <label className="fb-view-toggle">
+            <input type="checkbox" checked={view.showLabels}
+              onChange={(e) => setView({ showLabels: e.target.checked })} />
+            <span>Labels</span>
+          </label>
+          <label className="fb-view-toggle">
+            <input type="checkbox" checked={view.showPOI}
+              onChange={(e) => setView({ showPOI: e.target.checked })} />
+            <span>POIs</span>
+          </label>
+        </>)}
+      </div>
+
+      <div className="fb-view-section">
         <span className="fb-view-section-label">Terrain</span>
         <label className="fb-view-toggle">
           <input type="checkbox" checked={view.show3dTerrain}
@@ -899,6 +926,16 @@ function ViewMenuDropdown({ anchorRef }: { anchorRef: React.RefObject<HTMLDivEle
           <input type="checkbox" checked={view.maskDisqualifiedAsBlack}
             onChange={(e) => setView({ maskDisqualifiedAsBlack: e.target.checked })} />
           <span>Required mask black</span>
+        </label>
+      </div>
+
+      <div className="fb-view-section">
+        <span className="fb-view-section-label">Performance</span>
+        <label className="fb-view-toggle">
+          <input type="checkbox" checked={view.useGpuRendering}
+            disabled={!isWebGPUAvailable()}
+            onChange={(e) => setView({ useGpuRendering: e.target.checked })} />
+          <span>{isWebGPUAvailable() ? 'GPU (WebGPU)' : 'GPU (unsupported)'}</span>
         </label>
       </div>
     </div>

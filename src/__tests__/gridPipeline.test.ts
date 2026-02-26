@@ -32,6 +32,7 @@ import {
   acquireFloat32,
   releaseFloat32,
   MUNICIPALITY_VARS,
+  ALL_MUNICIPALITY_VARS,
 } from '../utils/variableGrids';
 import type { MunicipalityLUT } from '../utils/variableGrids';
 import { evaluateTransferFunction } from '../utils/transferFunction';
@@ -218,15 +219,15 @@ describe('buildVariableGrid', () => {
 });
 
 describe('buildAllVariableGrids', () => {
-  it('produces a grid for every MUNICIPALITY_VARS entry', () => {
+  it('produces a grid for every ALL_MUNICIPALITY_VARS entry', () => {
     const raster = new Int16Array([0, 0]);
     const mockLut = {} as MunicipalityLUT;
-    for (const v of MUNICIPALITY_VARS) {
+    for (const v of ALL_MUNICIPALITY_VARS) {
       mockLut[v] = new Float32Array([42]);
     }
 
     const grids = buildAllVariableGrids(raster, mockLut, 2, 1);
-    for (const v of MUNICIPALITY_VARS) {
+    for (const v of ALL_MUNICIPALITY_VARS) {
       expect(grids[v]).toBeInstanceOf(Float32Array);
       expect(grids[v].length).toBe(2);
       expect(grids[v][0]).toBe(42);

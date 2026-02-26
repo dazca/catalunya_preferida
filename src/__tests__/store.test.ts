@@ -20,7 +20,7 @@ describe('useAppStore', () => {
 
   it('has correct default state', () => {
     const state = useAppStore.getState();
-    expect(state.layers).toHaveLength(23);
+    expect(state.layers).toHaveLength(41);
     expect(state.sidebarOpen).toBe(true);
     expect(state.selectedMunicipality).toBeNull();
     expect(state.configs).toBeDefined();

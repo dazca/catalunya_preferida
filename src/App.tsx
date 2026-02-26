@@ -21,7 +21,7 @@ import {
 } from './utils/heatmapGrid';
 import type { ViewportSpec } from './utils/heatmapGrid';
 import { onDemLoaded, loadViewportTiles, isDemLoaded, sampleDemViewport } from './utils/demSlope';
-import { requestHeatmapRender, gridViewportSpecForZoom } from './utils/heatmapBridge';
+import { requestHeatmapRender, gridViewportSpecForZoom, setUseGpu } from './utils/heatmapBridge';
 
 export default function App() {
   const {
@@ -43,6 +43,9 @@ export default function App() {
     loading,
     error,
   } = useResourceData();
+
+  // Sync GPU toggle from store to bridge
+  useEffect(() => { setUseGpu(view.useGpuRendering ?? true); }, [view.useGpuRendering]);
 
   /** Extract municipality codes from GeoJSON */
   const municipalityCodes = useMemo(() => {
@@ -83,7 +86,8 @@ export default function App() {
   const activeFormula = useMemo(() => {
     const trimmed = customFormula.trim();
     if (!trimmed) return undefined;
-    if (trimmed === visualRawFormula.trim()) return undefined; // auto-generated — use visual pipeline
+    const visualTrimmed = visualRawFormula.trim();
+    if (trimmed === visualTrimmed) return undefined; // auto-generated — use visual pipeline
     return customFormula;
   }, [customFormula, visualRawFormula]);
 
@@ -105,10 +109,18 @@ export default function App() {
     return layers.map((l) => ({ ...l, enabled: l.id === soloLayer }));
   }, [layers, soloLayer]);
 
-  /** Scores for heatmap — recomputed when solo layer changes. */
+  /**
+   * Scores for heatmap — only computed when the legacy per-pixel pipeline
+   * is active (i.e. a custom formula is in use) AND a solo layer is selected.
+   * The grid pipeline recomputes per-pixel scores in the worker and does
+   * not need this, so we skip the expensive computeAllScores call.
+   */
+  const EMPTY_SCORES = useRef<Record<string, number>>({}).current;
   const heatmapScores = useMemo(() => {
-    if (municipalityCodes.length === 0) return {};
-    if (!soloLayer) return {}; // will use allScores below
+    if (municipalityCodes.length === 0) return EMPTY_SCORES;
+    if (!soloLayer) return EMPTY_SCORES;
+    // Grid pipeline (no custom formula) does not use per-municipality scores.
+    if (!activeFormula) return EMPTY_SCORES;
     const solo = computeAllScores(
       municipalityCodes,
       heatmapLayers,
@@ -119,7 +131,7 @@ export default function App() {
     const flat: Record<string, number> = {};
     for (const [codi, data] of Object.entries(solo)) flat[codi] = data.score;
     return flat;
-  }, [municipalityCodes, heatmapLayers, configs, municipalityData, soloLayer, activeFormula]);
+  }, [municipalityCodes, heatmapLayers, configs, municipalityData, soloLayer, activeFormula, EMPTY_SCORES]);
 
   /** Flatten to just the composite score for choropleth */
   const scores = useMemo(() => {
@@ -145,45 +157,34 @@ export default function App() {
   /** Higher-resolution spec for the grid-based pipeline (up to 1024px). */
   const [gridSpec, setGridSpec] = useState<ViewportSpec>(CATALONIA_VIEWPORT);
   const heatmapTimer = useRef<ReturnType<typeof setTimeout> | number>(0);
+  /** Tracks whether the initial (first) heatmap render has completed. */
+  const firstRenderDone = useRef(false);
   const viewportDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Zoom level above which the heatmap renders only the visible viewport for higher density. */
+  const ZOOM_VIEWPORT_THRESHOLD = 10;
 
   /** Called by MapContainer whenever the map is panned or zoomed. */
   const handleViewportChange = useCallback(
-    (_w: number, _s: number, _e: number, _n: number, zoom: number) => {
+    (w: number, s: number, e: number, n: number, zoom: number) => {
       if (viewportDebounce.current) clearTimeout(viewportDebounce.current);
+      // Shorter debounce at high zoom for snappier re-renders when panning.
+      const debounceMs = zoom >= ZOOM_VIEWPORT_THRESHOLD ? 300 : 600;
       viewportDebounce.current = setTimeout(() => {
-        // Always render over full Catalonia bounds to avoid partial overlays
-        // when map pitch/bearing alters visible viewport bounds.
-        setViewportSpec(
-          viewportSpecForZoom(
-            CATALONIA_VIEWPORT.w,
-            CATALONIA_VIEWPORT.s,
-            CATALONIA_VIEWPORT.e,
-            CATALONIA_VIEWPORT.n,
-            zoom,
-          ),
-        );
-        setGridSpec(
-          gridViewportSpecForZoom(
-            CATALONIA_VIEWPORT.w,
-            CATALONIA_VIEWPORT.s,
-            CATALONIA_VIEWPORT.e,
-            CATALONIA_VIEWPORT.n,
-            zoom,
-          ) as ViewportSpec,
-        );
+        // At high zoom, clip to the actual visible viewport for higher pixel density.
+        // At overview zoom, use full Catalonia to avoid partial overlay seams under pitch/bearing.
+        const bw = zoom >= ZOOM_VIEWPORT_THRESHOLD ? w : CATALONIA_VIEWPORT.w;
+        const bs = zoom >= ZOOM_VIEWPORT_THRESHOLD ? s : CATALONIA_VIEWPORT.s;
+        const be = zoom >= ZOOM_VIEWPORT_THRESHOLD ? e : CATALONIA_VIEWPORT.e;
+        const bn = zoom >= ZOOM_VIEWPORT_THRESHOLD ? n : CATALONIA_VIEWPORT.n;
+        setViewportSpec(viewportSpecForZoom(bw, bs, be, bn, zoom));
+        setGridSpec(gridViewportSpecForZoom(bw, bs, be, bn, zoom) as ViewportSpec);
         // Demand-load fine DEM tiles for this viewport
         const targetM = Math.max(80, Math.min(3000, Math.round(15_000 / Math.pow(2, zoom - 8))));
-        loadViewportTiles(
-          CATALONIA_VIEWPORT.w,
-          CATALONIA_VIEWPORT.s,
-          CATALONIA_VIEWPORT.e,
-          CATALONIA_VIEWPORT.n,
-          targetM,
-        ).then((anyNew) => {
+        loadViewportTiles(bw, bs, be, bn, targetM).then((anyNew) => {
           if (anyNew) setDemFineTileVersion((v) => v + 1);
         });
-      }, 600);
+      }, debounceMs);
     },
     [],
   );
@@ -287,10 +288,16 @@ export default function App() {
       }
     };
 
-    if ('requestIdleCallback' in window) {
-      heatmapTimer.current = requestIdleCallback(() => { run(); }, { timeout: 3000 });
+    if (!firstRenderDone.current && 'requestIdleCallback' in window) {
+      // First render: defer until browser is idle so map + terrain load first.
+      heatmapTimer.current = requestIdleCallback(() => {
+        firstRenderDone.current = true;
+        run();
+      }, { timeout: 3000 });
     } else {
-      heatmapTimer.current = setTimeout(() => { run(); }, 200);
+      // Subsequent re-renders (solo switch, weight change, etc.):
+      // use a short setTimeout for snappy interactive feedback.
+      heatmapTimer.current = setTimeout(() => { run(); }, 50);
     }
 
     return () => {

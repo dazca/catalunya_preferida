@@ -69,9 +69,13 @@ const EMPTY_DATA: MunicipalityData = {
 async function fetchJson<T>(path: string): Promise<T | null> {
   try {
     const resp = await fetch(path);
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      console.warn(`[fetchJson] HTTP ${resp.status} for ${path}`);
+      return null;
+    }
     return (await resp.json()) as T;
-  } catch {
+  } catch (err) {
+    console.warn(`[fetchJson] Failed to load ${path}:`, err);
     return null;
   }
 }

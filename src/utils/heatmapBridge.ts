@@ -29,6 +29,7 @@ import { buildMunicipalityLUT, buildAllVariableGrids } from './variableGrids';
 import type { MunicipalityLUT } from './variableGrids';
 import { computeVisualScoreGrid, scoreGridToRGBA } from './gridFormulaEngine';
 import type { HeatmapWorkerRequest, HeatmapWorkerResponse } from '../workers/heatmapWorker';
+import { isWebGPUAvailable, gpuRenderScoreGrid } from './gpuRenderer';
 
 /* ── Types ──────────────────────────────────────────────────────────── */
 
@@ -141,7 +142,7 @@ export function gridViewportSpecForZoom(
   const mPerDegLat = 110_540;
   const targetM = Math.max(5, Math.min(800, Math.round(4_000 / Math.pow(2, zoom - 8))));
 
-  const MAX = 1024;  // double legacy 512
+  const MAX = 2048;  // raised from 1024: viewport-only rendering covers a smaller area, same budget = more detail
   const cols = Math.min(MAX, Math.max(100, Math.ceil((e - w) * mPerDegLon / targetM)));
   const rows = Math.min(MAX, Math.max(75, Math.ceil((n - s) * mPerDegLat / targetM)));
 
@@ -355,14 +356,76 @@ function renderViaWorker(
   });
 }
 
+/* ── GPU render path ────────────────────────────────────────────────── */
+
+/** Whether to attempt the WebGPU path. Can be overridden by the store. */
+let _useGpu = true;
+
+/** Set whether the GPU path should be attempted. */
+export function setUseGpu(enabled: boolean): void {
+  _useGpu = enabled;
+}
+
+/** Check if GPU rendering is currently active. */
+export function isGpuActive(): boolean {
+  return _useGpu && isWebGPUAvailable();
+}
+
+async function renderViaGpu(
+  req: HeatmapRenderRequest,
+): Promise<HeatmapRenderResult> {
+  const t0 = performance.now();
+  const { municipalities, municipalityData, layers, configs, spec, demSamples, disqualifiedMask } = req;
+  const { cols, rows } = spec;
+
+  const enabledLayers = layers.filter((l) => l.enabled);
+
+  // 1. Membership raster (CPU, cached)
+  const membershipRaster = rasteriseMunicipalities(spec, municipalities);
+
+  // 2. LUT (CPU, cached)
+  const lut = getCachedLUT(municipalities, municipalityData);
+  const featureCount = municipalities.features.length;
+
+  // 3. GPU render
+  const result = await gpuRenderScoreGrid({
+    membershipRaster,
+    lut,
+    featureCount,
+    enabledLayers,
+    configs,
+    cols,
+    rows,
+    demSamples,
+    disqualifiedMask,
+    aspectPrefs: configs.terrain.aspect,
+    aspectWeight: configs.terrain.aspectWeight ?? 1,
+  });
+
+  if (!result) {
+    throw new Error('GPU render returned null');
+  }
+
+  // 4. Pixels -> blob URL
+  const dataUrl = await pixelsToBlobUrl(result.pixels, cols, rows);
+
+  return {
+    dataUrl,
+    bounds: [spec.w, spec.s, spec.e, spec.n],
+    minScore: result.minScore,
+    maxScore: result.maxScore,
+    renderTimeMs: performance.now() - t0,
+  };
+}
+
 /* ── Public API ─────────────────────────────────────────────────────── */
 
 /** Current pending render ID — used to cancel stale renders. */
 let _currentRenderId = 0;
 
 /**
- * Request a heatmap render.  Uses the Web Worker if available, otherwise
- * falls back to the main thread.
+ * Request a heatmap render. Tries GPU first (if enabled), then Worker,
+ * then main-thread fallback.
  *
  * Automatically cancels stale renders — only the most recent request
  * will resolve.  Earlier requests resolve with `null`.
@@ -380,7 +443,9 @@ export async function requestHeatmapRender(
   try {
     let result: HeatmapRenderResult;
 
-    if (getWorker()) {
+    if (_useGpu && isWebGPUAvailable()) {
+      result = await renderViaGpu(req);
+    } else if (getWorker()) {
       result = await renderViaWorker(req);
     } else {
       result = await renderOnMainThread(req);
@@ -391,9 +456,28 @@ export async function requestHeatmapRender(
 
     return result;
   } catch (e) {
-    console.warn('[heatmapBridge] Render failed, trying main thread fallback:', e);
-    // If worker failed, try main thread
+    console.warn('[heatmapBridge] Render failed, trying fallback:', e);
     if (_currentRenderId !== myId) return null;
+
+    // GPU failed -> try Worker
+    if (_useGpu && isWebGPUAvailable()) {
+      try {
+        console.warn('[heatmapBridge] Falling back from GPU to Worker/CPU');
+        let result: HeatmapRenderResult;
+        if (getWorker()) {
+          result = await renderViaWorker(req);
+        } else {
+          result = await renderOnMainThread(req);
+        }
+        if (_currentRenderId !== myId) return null;
+        return result;
+      } catch (e2) {
+        console.error('[heatmapBridge] Worker/CPU fallback also failed:', e2);
+        return null;
+      }
+    }
+
+    // Worker failed -> try main thread
     try {
       return await renderOnMainThread(req);
     } catch (e2) {
