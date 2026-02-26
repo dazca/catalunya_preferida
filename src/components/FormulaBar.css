@@ -593,6 +593,21 @@
 .fb-chip.fb-drop-before {
   border-left: 2px solid #6366f1;
 }
+/* Cross-section drop target: highlight the section container */
+.fb-section.fb-section-drop-target {
+  outline: 2px dashed #6366f1;
+  outline-offset: 2px;
+  border-radius: 6px;
+  background: rgba(99, 102, 241, 0.06);
+}
+/* Chip being dragged (origin) */
+.fb-chip.fb-chip-dragging {
+  opacity: 0.45;
+}
+/* Guard threshold value: draggable cursor */
+.fb-cmp-val {
+  cursor: ns-resize;
+}
 
 /* ================================================================== */
 /*  Context menu (right-click on chip)                                 */

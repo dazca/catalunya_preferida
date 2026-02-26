@@ -1,5 +1,5 @@
-/**
- * @file FormulaBar – bottom-docked scoring formula bar.
+﻿/**
+ * @file FormulaBar â€“ bottom-docked scoring formula bar.
  *
  * Shows: Score = icon(w) + icon(w) + ... [+]
  *
@@ -124,7 +124,7 @@ function comparisonFromNode(node: AstNode): { varName: string; op: string; value
   if (node.left.kind === 'identifier' && node.right.kind === 'number') {
     return { varName: node.left.name, op: node.op, value: node.right.value, valueNode: node.right };
   }
-  // number OP var  →  flip
+  // number OP var  â†’  flip
   if (node.right.kind === 'identifier' && node.left.kind === 'number') {
     const flipOp: Record<string, string> = { '<': '>', '>': '<', '<=': '>=', '>=': '<=', '==': '==', '!=': '!=' };
     return { varName: node.right.name, op: flipOp[node.op] ?? node.op, value: node.left.value, valueNode: node.left };
@@ -132,7 +132,7 @@ function comparisonFromNode(node: AstNode): { varName: string; op: string; value
   return null;
 }
 
-/* ─── Vote term labels ──────────────────────────────────────────────── */
+/* â”€â”€â”€ Vote term labels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const METRIC_LABELS: Record<VoteMetric, string> = {
   leftPct: 'Left %',
   rightPct: 'Right %',
@@ -141,15 +141,15 @@ const METRIC_LABELS: Record<VoteMetric, string> = {
   turnoutPct: 'Turnout %',
 };
 
-/* ═══════════════════════════════════════════════════════════════════════
-   TfControls – single transfer-function editor inside popover.
-   ═══════════════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   TfControls â€“ single transfer-function editor inside popover.
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 const SHAPE_OPTIONS: { value: TfShape; label: string; tip: string }[] = [
-  { value: 'sin',      label: 'SIN',      tip: 'Sinusoidal decay: 1 → floor' },
-  { value: 'invsin',   label: 'INVSIN',   tip: 'Sinusoidal rise: floor → 1' },
-  { value: 'range',    label: 'RANGE',    tip: 'Linear decay: 1 → floor' },
-  { value: 'invrange', label: 'INVRANGE', tip: 'Linear rise: floor → 1' },
+  { value: 'sin',      label: 'SIN',      tip: 'Sinusoidal decay: 1 â†’ floor' },
+  { value: 'invsin',   label: 'INVSIN',   tip: 'Sinusoidal rise: floor â†’ 1' },
+  { value: 'range',    label: 'RANGE',    tip: 'Linear decay: 1 â†’ floor' },
+  { value: 'invrange', label: 'INVRANGE', tip: 'Linear rise: floor â†’ 1' },
 ];
 
 function TfControls({
@@ -159,6 +159,7 @@ function TfControls({
   rangeMax,
   unit,
   canChangeTier = true,
+  onTierChange,
 }: {
   label: string;
   ltc: LayerTransferConfig;
@@ -166,6 +167,9 @@ function TfControls({
   rangeMax: number;
   unit: string;
   canChangeTier?: boolean;
+  /** Structural tier change callback; when provided, Req/Imp checkboxes
+   *  call this instead of patching the TF flags directly. */
+  onTierChange?: (tier: 'guard' | 'important' | 'sum') => void;
 }) {
   const t = useT();
   const tf = ltc.tf;
@@ -195,14 +199,26 @@ function TfControls({
           ))}
         </div>
         <div className="fb-tf-flags">
-          <label className="fb-tf-flag" title={tierDisabledTitle ?? "Required — disqualifies municipalities outside range"}>
+          <label className="fb-tf-flag" title={tierDisabledTitle ?? "Required â€” disqualifies municipalities outside range"}>
             <input type="checkbox" checked={tf.mandatory} disabled={!canChangeTier}
-              onChange={(e) => updateTf({ ...tf, mandatory: e.target.checked, ...(e.target.checked ? { important: false } : {}) })} />
+              onChange={(e) => {
+                if (onTierChange) {
+                  onTierChange(e.target.checked ? 'guard' : 'sum');
+                } else {
+                  updateTf({ ...tf, mandatory: e.target.checked, ...(e.target.checked ? { important: false } : {}) });
+                }
+              }} />
             <span className="fb-tf-flag-label">{t('tf.req')}</span>
           </label>
-          <label className="fb-tf-flag" title={tierDisabledTitle ?? "Important — multiplicative soft gate outside the sum"}>
+          <label className="fb-tf-flag" title={tierDisabledTitle ?? "Important â€” multiplicative soft gate outside the sum"}>
             <input type="checkbox" checked={tf.important} disabled={!canChangeTier}
-              onChange={(e) => updateTf({ ...tf, important: e.target.checked, ...(e.target.checked ? { mandatory: false } : {}) })} />
+              onChange={(e) => {
+                if (onTierChange) {
+                  onTierChange(e.target.checked ? 'important' : 'sum');
+                } else {
+                  updateTf({ ...tf, important: e.target.checked, ...(e.target.checked ? { mandatory: false } : {}) });
+                }
+              }} />
             <span className="fb-tf-flag-label">Imp</span>
           </label>
         </div>
@@ -216,7 +232,7 @@ function TfControls({
             onChange={(e) => updateTf({ ...tf, plateauEnd: +e.target.value })} />
           <span className="fb-tf-unit">{unit}</span>
         </label>
-        <span className="fb-tf-arrow">→</span>
+        <span className="fb-tf-arrow">â†’</span>
         <label className="fb-tf-param" title="End of transition zone">
           <span className="fb-tf-param-label">To</span>
           <input type="number" step="0.1" value={tf.decayEnd}
@@ -228,7 +244,7 @@ function TfControls({
       {/* Row 3: Ceiling/Floor (aka strength up/down) */}
       <div className="fb-tf-row fb-tf-row-floor">
         <label className="fb-tf-param" title="Upper output bound (Ceiling / Strength up)">
-          <span className="fb-tf-param-label">Ceiling ↑</span>
+          <span className="fb-tf-param-label">Ceiling â†‘</span>
           <input type="number" min="0" max="1" step="0.01" value={tf.ceiling ?? 1}
             onChange={(e) => {
               const next = Math.max(0, Math.min(1, +e.target.value));
@@ -237,7 +253,7 @@ function TfControls({
             }} />
         </label>
         <label className="fb-tf-param" title="Lower output bound (Floor / Strength down)">
-          <span className="fb-tf-param-label">Floor ↓</span>
+          <span className="fb-tf-param-label">Floor â†“</span>
           <input type="number" min="0" max="1" step="0.01" value={tf.floor}
             onChange={(e) => {
               const next = Math.max(0, Math.min(1, +e.target.value));
@@ -255,12 +271,12 @@ function TfControls({
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   LayerEditorContent – renders the full filter editor for any layer
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   LayerEditorContent â€“ renders the full filter editor for any layer
    inside the popover.
-   ═══════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
-function LayerEditorContent({ layerId, canChangeTier = true }: { layerId: LayerId; canChangeTier?: boolean }) {
+function LayerEditorContent({ layerId, canChangeTier = true, onTierChange }: { layerId: LayerId; canChangeTier?: boolean; onTierChange?: (tier: 'guard' | 'important' | 'sum') => void }) {
   const { configs, updateConfig } = useAppStore();
   const t = useT();
 
@@ -268,11 +284,11 @@ function LayerEditorContent({ layerId, canChangeTier = true }: { layerId: LayerI
     case 'terrainSlope':
       return <TfControls label={t('fc.terrain.slope')} ltc={configs.terrain.slope}
         onChange={(ltc) => updateConfig('terrain', { ...configs.terrain, slope: ltc })}
-        rangeMax={60} unit="deg" canChangeTier={canChangeTier} />;
+        rangeMax={60} unit="deg" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     case 'terrainElevation':
       return <TfControls label={t('fc.terrain.elevation')} ltc={configs.terrain.elevation}
         onChange={(ltc) => updateConfig('terrain', { ...configs.terrain, elevation: ltc })}
-        rangeMax={3000} unit="m" canChangeTier={canChangeTier} />;
+        rangeMax={3000} unit="m" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     case 'terrainAspect':
       return (
         <div className="fb-tf-controls">
@@ -307,59 +323,59 @@ function LayerEditorContent({ layerId, canChangeTier = true }: { layerId: LayerI
           );
           updateConfig('votes', { terms });
         }}
-        rangeMax={100} unit="%" canChangeTier={canChangeTier} />;
+        rangeMax={100} unit="%" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     }
     case 'transit':
       return <TfControls label={t('fc.transit.dist')} ltc={configs.transit}
-        onChange={(ltc) => updateConfig('transit', ltc)} rangeMax={50} unit="km" canChangeTier={canChangeTier} />;
+        onChange={(ltc) => updateConfig('transit', ltc)} rangeMax={50} unit="km" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     case 'forest':
       return <TfControls label={t('fc.forest.cover')} ltc={configs.forest}
-        onChange={(ltc) => updateConfig('forest', ltc)} rangeMax={100} unit="%" canChangeTier={canChangeTier} />;
+        onChange={(ltc) => updateConfig('forest', ltc)} rangeMax={100} unit="%" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     case 'airQualityPm10':
       return <TfControls label={t('fc.airQuality.pm10')} ltc={configs.airQuality.pm10}
         onChange={(ltc) => updateConfig('airQuality', { ...configs.airQuality, pm10: ltc })}
-        rangeMax={100} unit="ug/m3" canChangeTier={canChangeTier} />;
+        rangeMax={100} unit="ug/m3" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     case 'airQualityNo2':
       return <TfControls label={t('fc.airQuality.no2')} ltc={configs.airQuality.no2}
         onChange={(ltc) => updateConfig('airQuality', { ...configs.airQuality, no2: ltc })}
-        rangeMax={100} unit="ug/m3" canChangeTier={canChangeTier} />;
+        rangeMax={100} unit="ug/m3" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     case 'crime':
       return <TfControls label={t('fc.crime.rate')} ltc={configs.crime}
-        onChange={(ltc) => updateConfig('crime', ltc)} rangeMax={100} unit="per 1k" canChangeTier={canChangeTier} />;
+        onChange={(ltc) => updateConfig('crime', ltc)} rangeMax={100} unit="per 1k" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     case 'healthcare':
       return <TfControls label={t('fc.healthcare.dist')} ltc={configs.healthcare}
-        onChange={(ltc) => updateConfig('healthcare', ltc)} rangeMax={50} unit="km" canChangeTier={canChangeTier} />;
+        onChange={(ltc) => updateConfig('healthcare', ltc)} rangeMax={50} unit="km" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     case 'schools':
       return <TfControls label={t('fc.schools.dist')} ltc={configs.schools}
-        onChange={(ltc) => updateConfig('schools', ltc)} rangeMax={30} unit="km" canChangeTier={canChangeTier} />;
+        onChange={(ltc) => updateConfig('schools', ltc)} rangeMax={30} unit="km" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     case 'internet':
       return <TfControls label={t('fc.internet.fiber')} ltc={configs.internet}
-        onChange={(ltc) => updateConfig('internet', ltc)} rangeMax={100} unit="%" canChangeTier={canChangeTier} />;
+        onChange={(ltc) => updateConfig('internet', ltc)} rangeMax={100} unit="%" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     case 'climateTemp':
       return <TfControls label={t('fc.climate.temp')} ltc={configs.climate.temperature}
         onChange={(ltc) => updateConfig('climate', { ...configs.climate, temperature: ltc })}
-        rangeMax={35} unit="C" canChangeTier={canChangeTier} />;
+        rangeMax={35} unit="C" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     case 'climateRainfall':
       return <TfControls label={t('fc.climate.rain')} ltc={configs.climate.rainfall}
         onChange={(ltc) => updateConfig('climate', { ...configs.climate, rainfall: ltc })}
-        rangeMax={1500} unit="mm" canChangeTier={canChangeTier} />;
+        rangeMax={1500} unit="mm" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     case 'rentalPrices':
       return <TfControls label={t('fc.rental.monthly')} ltc={configs.rentalPrices}
-        onChange={(ltc) => updateConfig('rentalPrices', ltc)} rangeMax={3000} unit="EUR" canChangeTier={canChangeTier} />;
+        onChange={(ltc) => updateConfig('rentalPrices', ltc)} rangeMax={3000} unit="EUR" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     case 'employment':
       return <TfControls label={t('fc.employment.unemployed')} ltc={configs.employment}
-        onChange={(ltc) => updateConfig('employment', ltc)} rangeMax={40} unit="%" canChangeTier={canChangeTier} />;
+        onChange={(ltc) => updateConfig('employment', ltc)} rangeMax={40} unit="%" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     case 'amenities':
       return <TfControls label={t('fc.amenities.dist')} ltc={configs.amenities}
-        onChange={(ltc) => updateConfig('amenities', ltc)} rangeMax={50} unit="km" canChangeTier={canChangeTier} />;
+        onChange={(ltc) => updateConfig('amenities', ltc)} rangeMax={50} unit="km" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     default:
       return null;
   }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   EditPopover – floating editor panel above a chip on hover / pin.
-   ═══════════════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   EditPopover â€“ floating editor panel above a chip on hover / pin.
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function EditPopover({
   layer,
@@ -368,6 +384,7 @@ function EditPopover({
   pinned,
   duplicateCount,
   canChangeTier = true,
+  onTierChange,
   onPin,
   onClose,
   onRemove,
@@ -381,6 +398,7 @@ function EditPopover({
   pinned: boolean;
   duplicateCount?: number;
   canChangeTier?: boolean;
+  onTierChange?: (tier: 'guard' | 'important' | 'sum') => void;
   onPin: () => void;
   onClose: () => void;
   onRemove: () => void;
@@ -428,16 +446,16 @@ function EditPopover({
           <button className="fb-popover-minimize"
             onClick={(e) => { e.stopPropagation(); onClose(); }}
             title="Minimize editor">
-            —
+            â€”
           </button>
           <button className={`fb-popover-solo ${isSolo ? 'active' : ''}`}
             onClick={(e) => { e.stopPropagation(); setSoloLayer(isSolo ? null : layer.id); }}
             title={isSolo ? t('solo.button.on' as keyof Translations) : t('solo.button.off' as keyof Translations)}>
-            ◎
+            â—Ž
           </button>
           <button className="fb-popover-remove" onClick={(e) => { e.stopPropagation(); onRemove(); }}
             title="Remove layer">
-            ×
+            Ã—
           </button>
         </div>
       </div>
@@ -478,22 +496,22 @@ function EditPopover({
 
       {/* Layer-specific controls */}
       <div className="fb-popover-body">
-        <LayerEditorContent layerId={layer.id} canChangeTier={canChangeTier} />
+        <LayerEditorContent layerId={layer.id} canChangeTier={canChangeTier} onTierChange={onTierChange} />
       </div>
     </div>
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   AddLayerButton – [+] dropdown with hierarchical submenu groups.
-   ═══════════════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   AddLayerButton â€“ [+] dropdown with hierarchical submenu groups.
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 /** Groups that get a hover-submenu in the [+] dropdown. */
 const ADD_LAYER_GROUPS: { groupLabel: string; groupIcon: string; ids: LayerId[] }[] = [
-  { groupLabel: 'Terrain', groupIcon: '⛰', ids: ['terrainSlope', 'terrainElevation', 'terrainAspect'] },
-  { groupLabel: 'Vote Sentiment', groupIcon: '🗳', ids: ['votesLeft', 'votesRight', 'votesIndep', 'votesUnionist', 'votesTurnout'] },
-  { groupLabel: 'Air Quality', groupIcon: '🌬', ids: ['airQualityPm10', 'airQualityNo2'] },
-  { groupLabel: 'Climate', groupIcon: '☀', ids: ['climateTemp', 'climateRainfall'] },
+  { groupLabel: 'Terrain', groupIcon: 'â›°', ids: ['terrainSlope', 'terrainElevation', 'terrainAspect'] },
+  { groupLabel: 'Vote Sentiment', groupIcon: 'ðŸ—³', ids: ['votesLeft', 'votesRight', 'votesIndep', 'votesUnionist', 'votesTurnout'] },
+  { groupLabel: 'Air Quality', groupIcon: 'ðŸŒ¬', ids: ['airQualityPm10', 'airQualityNo2'] },
+  { groupLabel: 'Climate', groupIcon: 'â˜€', ids: ['climateTemp', 'climateRainfall'] },
 ];
 const FLAT_IDS: LayerId[] = ['transit', 'forest', 'soil', 'crime', 'healthcare', 'schools', 'internet', 'noise', 'rentalPrices', 'employment', 'amenities'];
 
@@ -566,7 +584,7 @@ function AddLayerButton({
                 <div className="fb-add-group-label">
                   <span className="fb-dd-icon">{group.groupIcon}</span>
                   {group.groupLabel}
-                  <span className="fb-add-group-arrow">▸</span>
+                  <span className="fb-add-group-arrow">â–¸</span>
                 </div>
                 {hoveredGroup === gi && (
                   <div className="fb-add-submenu">
@@ -586,7 +604,7 @@ function AddLayerButton({
                           title={disabled ? 'Already added' : isAdded ? 'Add again' : ''}>
                           <span className="fb-dd-icon">{l.icon}</span>
                           {t(`layer.${id}.label` as keyof Translations) || l.label}
-                          {isAdded && <span className="fb-add-check">{allowDuplicateAdds ? `+${varTfCounts?.get(id) ?? 1}` : '✓'}</span>}
+                          {isAdded && <span className="fb-add-check">{allowDuplicateAdds ? `+${varTfCounts?.get(id) ?? 1}` : 'âœ“'}</span>}
                         </button>
                       );
                     })}
@@ -613,7 +631,7 @@ function AddLayerButton({
                 title={disabled ? 'Already added' : isAdded ? 'Add again' : ''}>
                 <span className="fb-dd-icon">{l.icon}</span>
                 {t(`layer.${id}.label` as keyof Translations) || l.label}
-                {isAdded && <span className="fb-add-check">{allowDuplicateAdds ? `+${varTfCounts?.get(id) ?? 1}` : '✓'}</span>}
+                {isAdded && <span className="fb-add-check">{allowDuplicateAdds ? `+${varTfCounts?.get(id) ?? 1}` : 'âœ“'}</span>}
               </button>
             );
           })}
@@ -623,9 +641,9 @@ function AddLayerButton({
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   ViewMenuDropdown – map view settings, inlined in the formula bar.
-   ═══════════════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   ViewMenuDropdown â€“ map view settings, inlined in the formula bar.
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function ViewMenuDropdown({ anchorRef }: { anchorRef: React.RefObject<HTMLDivElement | null> }) {
   const view = useAppStore((s) => s.view);
@@ -715,9 +733,9 @@ function ViewMenuDropdown({ anchorRef }: { anchorRef: React.RefObject<HTMLDivEle
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   FormulaBar – root component
-   ═══════════════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   FormulaBar â€“ root component
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 export default function FormulaBar() {
   const {
@@ -929,7 +947,7 @@ export default function FormulaBar() {
 
   /**
    * The formula shown in the raw textarea.  When in Visual mode the store's
-   * customFormula is empty — but we seed the textarea from visualRawFormula
+   * customFormula is empty â€” but we seed the textarea from visualRawFormula
    * when opening or switching to Raw.
    */
 
@@ -956,7 +974,7 @@ export default function FormulaBar() {
     });
   }, []);
 
-  /* ── Popover hover keep-alive ────────────────────────────────── */
+  /* â”€â”€ Popover hover keep-alive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const handlePopoverEnter = useCallback(() => {
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
   }, []);
@@ -979,7 +997,7 @@ export default function FormulaBar() {
     setHoveredChip(null);
   }, []);
 
-  /* ── Chip hover / click handlers ─────────────────────────────── */
+  /* â”€â”€ Chip hover / click handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const handleChipHover = useCallback((chipKey: string, id: LayerId) => {
     if (isPopoverSuppressed()) return;
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
@@ -1010,7 +1028,7 @@ export default function FormulaBar() {
   const handlePopoverRemove = useCallback(() => {
     if (!activeId) return;
 
-    // ── Section-based removal (sum-N, imp-N, guard-N, extra-N) ──
+    // â”€â”€ Section-based removal (sum-N, imp-N, guard-N, extra-N) â”€â”€
     if (normalizedCustom && formulaSections && activeChipKey) {
       const secMatch = activeChipKey.match(/^(sum|imp|guard|extra)-(\d+)/);
       if (secMatch) {
@@ -1055,9 +1073,9 @@ export default function FormulaBar() {
               const layer = layers.find((l) => l.id === activeId);
               if (layer?.enabled) toggleLayer(activeId);
             }
-          } catch { /* parse failure — leave layer as-is */ }
+          } catch { /* parse failure â€” leave layer as-is */ }
         } else if (!nextFormula) {
-          // Formula emptied out — disable layer
+          // Formula emptied out â€” disable layer
           const layer = layers.find((l) => l.id === activeId);
           if (layer?.enabled) toggleLayer(activeId);
         }
@@ -1068,7 +1086,7 @@ export default function FormulaBar() {
       }
     }
 
-    // ── AST-based removal (root-... chip keys from non-sectioned rendering) ──
+    // â”€â”€ AST-based removal (root-... chip keys from non-sectioned rendering) â”€â”€
     if (normalizedCustom && visualAst && activeChipKey && activeChipKey.startsWith('root')) {
       const removeByKey = (node: AstNode, targetKey: string, currentKey: string): AstNode | null => {
         if (currentKey === targetKey) return null;
@@ -1126,7 +1144,7 @@ export default function FormulaBar() {
     setHoveredChip(null);
   }, [activeChipKey, activeId, buildFormulaFromSections, formulaSections, layers, normalizedCustom, setCustomFormula, toggleLayer, visualAst]);
 
-  /* ── [+] adds layer and pins its popover ─────────────────────── */
+  /* â”€â”€ [+] adds layer and pins its popover â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const handleAddLayer = useCallback((id: LayerId) => {
     if (allowDuplicateAdds) {
       const tf = layerTf(id, configs);
@@ -1172,7 +1190,7 @@ export default function FormulaBar() {
     setPinnedChip({ key: `layer:${id}`, layerId: id });
   }, [allowDuplicateAdds, buildFormulaFromSections, configs, ensureLayerEnabled, formulaSections, layers, normalizedCustom, setCustomFormula, toggleLayer]);
 
-  /* ── Reverse lookup: variable name → LayerId ─────────────────── */
+  /* â”€â”€ Reverse lookup: variable name â†’ LayerId â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const varToLayerId = useMemo(() => {
     const m = new Map<string, LayerId>();
     for (const [id, varName] of Object.entries(LAYER_VAR)) m.set(varName, id as LayerId);
@@ -1192,7 +1210,7 @@ export default function FormulaBar() {
     return m;
   }, [visualAst, varToLayerId]);
 
-  /* ── Context-menu handler (right-click on chip) ──────────────── */
+  /* â”€â”€ Context-menu handler (right-click on chip) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const handleChipContextMenu = useCallback((
     e: React.MouseEvent,
     chipKey: string,
@@ -1204,7 +1222,7 @@ export default function FormulaBar() {
     setContextMenu({ chipKey, layerId, x: e.clientX, y: e.clientY, section });
   }, []);
 
-  /* ── Close context menu on outside click ─────────────────────── */
+  /* â”€â”€ Close context menu on outside click â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   useEffect(() => {
     if (!contextMenu) return;
     const handler = () => setContextMenu(null);
@@ -1212,7 +1230,7 @@ export default function FormulaBar() {
     return () => document.removeEventListener('mousedown', handler);
   }, [contextMenu]);
 
-  /* ── Change layer tier (mandatory / important / sum) ─────────── */
+  /* â”€â”€ Change layer tier (mandatory / important / sum) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const patchTfFlag = useCallback((id: LayerId, patch: Partial<{ mandatory: boolean; important: boolean }>) => {
     const c = configs;
     const patchTfInner = (tf: TransferFunction) => ({ ...tf, ...patch });
@@ -1257,11 +1275,115 @@ export default function FormulaBar() {
     }
   }, [configs, updateConfig]);
 
-  const handleContextAction = useCallback((action: 'mandatory' | 'important' | 'sum' | 'remove') => {
-    if (!contextMenu) return;
-    const { layerId } = contextMenu;
-    switch (action) {
-      case 'mandatory':
+  /** Move a term between sections (guard â†” important â†” sum).
+   *  When a customFormula is active, structurally edits formulaSections.
+   *  Otherwise patches the store TF flags. */
+  const handleTierChange = useCallback((
+    layerId: LayerId,
+    chipKey: string,
+    newTier: 'guard' | 'important' | 'sum',
+  ) => {
+    // Determine current section from chipKey
+    const secMatch = chipKey.match(/^(sum|imp|guard)-(\d+)/);
+    const currentSection = secMatch ? secMatch[1] as 'sum' | 'imp' | 'guard' : null;
+    const currentIdx = secMatch ? parseInt(secMatch[2], 10) : -1;
+
+    // If custom formula is active and we have sections, structurally modify
+    if (normalizedCustom && formulaSections && currentSection) {
+      const next: SimpleStructure = { ...formulaSections,
+        guards: [...formulaSections.guards],
+        importantTerms: [...formulaSections.importantTerms],
+        terms: [...formulaSections.terms],
+        extras: [...formulaSections.extras],
+      };
+
+      // Extract the term/guard from its current section
+      let term: SimpleTerm | null = null;
+      let guardNode: { varName: string; op: string; value: number } | null = null;
+
+      if (currentSection === 'sum' && currentIdx < next.terms.length) {
+        term = next.terms[currentIdx];
+        next.terms.splice(currentIdx, 1);
+      } else if (currentSection === 'imp' && currentIdx < next.importantTerms.length) {
+        term = next.importantTerms[currentIdx];
+        next.importantTerms.splice(currentIdx, 1);
+      } else if (currentSection === 'guard' && currentIdx < next.guards.length) {
+        const g = next.guards[currentIdx];
+        next.guards.splice(currentIdx, 1);
+        // Extract guard info
+        if (g.left.kind === 'identifier' && g.right.kind === 'number') {
+          guardNode = { varName: g.left.name, op: g.op, value: g.right.value };
+        }
+      }
+
+      // Insert into the new section
+      if (newTier === 'guard') {
+        // Convert term â†’ comparison guard: `var < decayEnd`
+        const varName = term?.varName ?? guardNode?.varName;
+        const guardVal = term?.N ?? guardNode?.value ?? 100;
+        if (varName) {
+          const guardAst: import('../utils/formulaParser').BinopNode = {
+            kind: 'binop',
+            op: '<',
+            left: { kind: 'identifier', name: varName },
+            right: { kind: 'number', value: guardVal },
+          };
+          next.guards.push(guardAst);
+        }
+      } else if (newTier === 'important') {
+        if (term) {
+          next.importantTerms.push(term);
+        } else if (guardNode) {
+          // guard â†’ important: create a TF term from store config defaults
+          const lid = varToLayerId.get(guardNode.varName);
+          const tf = lid ? layerTf(lid, configs) : null;
+          const newTerm: SimpleTerm = {
+            weight: 1,
+            fn: tf ? tfFnName(tf) : 'SIN',
+            varName: guardNode.varName,
+            M: tf?.plateauEnd ?? 0,
+            N: tf?.decayEnd ?? guardNode.value,
+          };
+          if (tf && ((tf.ceiling ?? 1) !== 1 || tf.floor !== 0)) {
+            newTerm.high = tf.ceiling ?? 1;
+            newTerm.low = tf.floor;
+          }
+          next.importantTerms.push(newTerm);
+        }
+      } else {
+        // sum
+        if (term) {
+          // Preserve weight if it already had one, else default to 1
+          if (term.weight === 0) term = { ...term, weight: 1 };
+          next.terms.push(term);
+        } else if (guardNode) {
+          // guard â†’ sum: create a TF term from store config defaults
+          const lid = varToLayerId.get(guardNode.varName);
+          const tf = lid ? layerTf(lid, configs) : null;
+          const newTerm: SimpleTerm = {
+            weight: 1,
+            fn: tf ? tfFnName(tf) : 'SIN',
+            varName: guardNode.varName,
+            M: tf?.plateauEnd ?? 0,
+            N: tf?.decayEnd ?? guardNode.value,
+          };
+          if (tf && ((tf.ceiling ?? 1) !== 1 || tf.floor !== 0)) {
+            newTerm.high = tf.ceiling ?? 1;
+            newTerm.low = tf.floor;
+          }
+          next.terms.push(newTerm);
+        }
+      }
+
+      next.totalWeight = next.terms.reduce((acc, t) => acc + t.weight, 0);
+      const nextFormula = buildFormulaFromSections(next);
+      setCustomFormula(nextFormula);
+      setFormulaDraft(nextFormula);
+    }
+
+    // Also patch store flags so visual mode stays in sync
+    switch (newTier) {
+      case 'guard':
         patchTfFlag(layerId, { mandatory: true, important: false });
         break;
       case 'important':
@@ -1270,27 +1392,35 @@ export default function FormulaBar() {
       case 'sum':
         patchTfFlag(layerId, { mandatory: false, important: false });
         break;
-      case 'remove':
-        // Re-use existing remove logic
-        handlePopoverRemove();
-        break;
     }
-    // Tier changes invalidate any stale customFormula so visual mode
+
+    // If no custom formula was active, clear stale drafts so visual mode
     // regenerates from the updated configs immediately.
-    if (action !== 'remove') {
+    if (!normalizedCustom) {
       setCustomFormula('');
       setFormulaDraft('');
     }
-    setContextMenu(null);
-  }, [contextMenu, handlePopoverRemove, patchTfFlag, setCustomFormula]);
+  }, [buildFormulaFromSections, configs, formulaSections, normalizedCustom, patchTfFlag, setCustomFormula, varToLayerId]);
 
-  /* ── Pointer-based chip drag (angle-disambiguated) ─────────────
+  const handleContextAction = useCallback((action: 'mandatory' | 'important' | 'sum' | 'remove') => {
+    if (!contextMenu) return;
+    const { layerId, chipKey } = contextMenu;
+    if (action === 'remove') {
+      handlePopoverRemove();
+    } else {
+      const tier = action === 'mandatory' ? 'guard' : action;
+      handleTierChange(layerId, chipKey, tier as 'guard' | 'important' | 'sum');
+    }
+    setContextMenu(null);
+  }, [contextMenu, handlePopoverRemove, handleTierChange]);
+
+  /* â”€â”€ Pointer-based chip drag (angle-disambiguated) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    *
    * pointerdown on a chip records start position + context.
    * After 5 px of movement the angle decides the mode:
-   *   • horizontal ±14° → chip reorder
-   *   • vertical   ±20° from 90° → value adjustment (weight / param)
-   * ──────────────────────────────────────────────────────────────── */
+   *   â€¢ horizontal Â±14Â° â†’ chip reorder
+   *   â€¢ vertical   Â±20Â° from 90Â° â†’ value adjustment (weight / param)
+   * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const REORDER_HALF_ANGLE = 14;  // degrees from horizontal
   const ADJUST_HALF_ANGLE = 20;   // degrees from vertical
   const INTENT_THRESHOLD = 5;     // px before deciding
@@ -1307,14 +1437,45 @@ export default function FormulaBar() {
     adjustStartVal: number;
     adjustStep: number;
     adjustCb: ((v: number) => void) | null;
+    /** When true, skip angle gate and go straight to adjust mode. */
+    adjustOnly: boolean;
   } | null>(null);
 
   /** All chip elements by section-idx key, for hit-testing during reorder. */
   const sectionChipRefs = useRef<Map<string, HTMLSpanElement>>(new Map());
+  /** Section container elements for cross-section drag detection. */
+  const sectionElRefs = useRef<Map<SectionKind, HTMLSpanElement>>(new Map());
 
   const executeReorder = useCallback((section: SectionKind, fromIdx: number, toIdx: number) => {
     if (fromIdx === toIdx) return;
-    if (section === 'sum' && !normalizedCustom && formulaSections) {
+
+    // Custom formula path: structurally reorder inside formulaSections, rebuild
+    if (normalizedCustom && formulaSections) {
+      const next: SimpleStructure = { ...formulaSections,
+        guards: [...formulaSections.guards],
+        importantTerms: [...formulaSections.importantTerms],
+        terms: [...formulaSections.terms],
+        extras: [...formulaSections.extras],
+      };
+      let arr: unknown[] | null = null;
+      switch (section) {
+        case 'sum': arr = next.terms; break;
+        case 'important': arr = next.importantTerms; break;
+        case 'guard': arr = next.guards; break;
+      }
+      if (arr && fromIdx < arr.length) {
+        const [moved] = arr.splice(fromIdx, 1);
+        arr.splice(toIdx, 0, moved);
+        next.totalWeight = next.terms.reduce((acc, t) => acc + t.weight, 0);
+        const nextFormula = buildFormulaFromSections(next);
+        setCustomFormula(nextFormula);
+        setFormulaDraft(nextFormula);
+      }
+      return;
+    }
+
+    // Pure visual mode: reorder via layerOrder (sum section only)
+    if (section === 'sum' && formulaSections) {
       const sumTerms = formulaSections.terms;
       const sumVarNames = sumTerms.map(t => t.varName);
       const sumLayerIds = sumVarNames.map(vn => varToLayerId.get(vn)).filter(Boolean) as LayerId[];
@@ -1325,10 +1486,9 @@ export default function FormulaBar() {
       const otherLayers = layerOrder.filter(id => !sumSet.has(id));
       setLayerOrder([...otherLayers, ...newOrder]);
     }
-    // guard / important reorder could be added later
-  }, [formulaSections, layerOrder, normalizedCustom, setLayerOrder, varToLayerId]);
+  }, [buildFormulaFromSections, formulaSections, layerOrder, normalizedCustom, setCustomFormula, setLayerOrder, varToLayerId]);
 
-  /** Find the closest chip index in the same section based on pointer X. */
+  /** Find the closest chip index in a given section based on pointer X. */
   const findDropIndex = useCallback((section: SectionKind, clientX: number, fromIdx: number): number => {
     let best = fromIdx;
     let bestDist = Infinity;
@@ -1343,6 +1503,21 @@ export default function FormulaBar() {
     return best;
   }, []);
 
+  /** Detect which section the pointer is hovering over by DOM position. */
+  const findHoveredSection = useCallback((clientX: number, clientY: number): SectionKind | null => {
+    let bestSection: SectionKind | null = null;
+    let bestDist = Infinity;
+    sectionElRefs.current.forEach((el, sec) => {
+      const rect = el.getBoundingClientRect();
+      // Check vertical overlap (generous â€” chip might be above or below)
+      if (clientY < rect.top - 20 || clientY > rect.bottom + 20) return;
+      // Horizontal distance: if inside rect â†’ 0, else distance to nearest edge
+      const dx = clientX < rect.left ? rect.left - clientX : clientX > rect.right ? clientX - rect.right : 0;
+      if (dx < bestDist) { bestDist = dx; bestSection = sec; }
+    });
+    return bestSection;
+  }, []);
+
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
       const cd = chipDragRef.current;
@@ -1354,27 +1529,38 @@ export default function FormulaBar() {
 
       if (cd.intent === 'pending') {
         if (dist < INTENT_THRESHOLD) return; // wait for threshold
-        const angleDeg = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
-        // Horizontal band: angle ∈ [0, REORDER_HALF_ANGLE] or [180-R, 180]
-        const isHorizontal = angleDeg < REORDER_HALF_ANGLE || angleDeg > (180 - REORDER_HALF_ANGLE);
-        // Vertical band: angle ∈ [90-A, 90+A]
-        const isVertical = Math.abs(angleDeg - 90) < ADJUST_HALF_ANGLE;
 
-        if (isHorizontal) {
-          cd.intent = 'reorder';
-          setDragReorder({ section: cd.section, fromIdx: cd.idx });
-          document.body.style.cursor = 'grabbing';
-        } else if (isVertical && cd.adjustCb) {
+        // When the user started on a draggable number (adjustOnly flag),
+        // skip angle gating and go straight to value-adjust mode.
+        if (cd.adjustOnly && cd.adjustCb) {
           cd.intent = 'adjust';
           document.body.style.cursor = 'ns-resize';
         } else {
-          cd.intent = 'none'; // diagonal — ignore
+          const angleDeg = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
+          // Horizontal band: angle âˆˆ [0, REORDER_HALF_ANGLE] or [180-R, 180]
+          const isHorizontal = angleDeg < REORDER_HALF_ANGLE || angleDeg > (180 - REORDER_HALF_ANGLE);
+          // Vertical band: angle âˆˆ [90-A, 90+A]
+          const isVertical = Math.abs(angleDeg - 90) < ADJUST_HALF_ANGLE;
+
+          if (isHorizontal) {
+            cd.intent = 'reorder';
+            setDragReorder({ section: cd.section, fromIdx: cd.idx });
+            document.body.style.cursor = 'grabbing';
+          } else if (isVertical && cd.adjustCb) {
+            cd.intent = 'adjust';
+            document.body.style.cursor = 'ns-resize';
+          } else {
+            cd.intent = 'none'; // diagonal â€” ignore
+          }
         }
       }
 
       if (cd.intent === 'reorder') {
-        const toIdx = findDropIndex(cd.section, e.clientX, cd.idx);
-        setDropTarget({ section: cd.section, idx: toIdx });
+        // Detect if pointer has moved into a different section area
+        const hoveredSection = findHoveredSection(e.clientX, e.clientY);
+        const targetSection = hoveredSection ?? cd.section;
+        const toIdx = findDropIndex(targetSection, e.clientX, targetSection === cd.section ? cd.idx : 0);
+        setDropTarget({ section: targetSection, idx: toIdx });
       }
 
       if (cd.intent === 'adjust' && cd.adjustCb) {
@@ -1387,7 +1573,27 @@ export default function FormulaBar() {
       const cd = chipDragRef.current;
       if (!cd) return;
       if (cd.intent === 'reorder' && dropTarget) {
-        executeReorder(cd.section, cd.idx, dropTarget.idx);
+        if (dropTarget.section !== cd.section) {
+          // Cross-section drop -> tier change
+          const chipKey = `${cd.section === 'guard' ? 'guard' : cd.section === 'important' ? 'imp' : 'sum'}-${cd.idx}`;
+          let layerId: LayerId | null = null;
+          if (formulaSections) {
+            const sec = cd.section;
+            if (sec === 'sum' && cd.idx < formulaSections.terms.length) {
+              layerId = varToLayerId.get(formulaSections.terms[cd.idx].varName) ?? null;
+            } else if (sec === 'important' && cd.idx < formulaSections.importantTerms.length) {
+              layerId = varToLayerId.get(formulaSections.importantTerms[cd.idx].varName) ?? null;
+            } else if (sec === 'guard' && cd.idx < formulaSections.guards.length) {
+              const g = formulaSections.guards[cd.idx];
+              if (g.left.kind === 'identifier') layerId = varToLayerId.get(g.left.name) ?? null;
+            }
+          }
+          if (layerId) {
+            handleTierChange(layerId, chipKey, dropTarget.section);
+          }
+        } else {
+          executeReorder(cd.section, cd.idx, dropTarget.idx);
+        }
       }
       chipDragRef.current = null;
       isDraggingRef.current = false;
@@ -1395,7 +1601,6 @@ export default function FormulaBar() {
       setDragReorder(null);
       setDropTarget(null);
       document.body.style.cursor = '';
-      // Release capture
       try { (e.target as HTMLElement).releasePointerCapture(cd.pointerId); } catch { /* ok */ }
     };
 
@@ -1405,7 +1610,7 @@ export default function FormulaBar() {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
-  }, [dropTarget, executeReorder, findDropIndex, suppressPopover]);
+  }, [dropTarget, executeReorder, findDropIndex, findHoveredSection, formulaSections, handleTierChange, suppressPopover, varToLayerId]);
 
   /** Start chip drag intent tracking. Call from onPointerDown on the chip. */
   const startChipDrag = useCallback((
@@ -1421,6 +1626,12 @@ export default function FormulaBar() {
     isDraggingRef.current = true;
     suppressPopover();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    // Detect if target is a draggable number element â€” skip angle gate if so
+    const target = e.target as HTMLElement;
+    const isNumberTarget = target.classList.contains('fb-chip-weight')
+      || target.classList.contains('fb-chip-param-m')
+      || target.classList.contains('fb-chip-param-n')
+      || target.classList.contains('fb-cmp-val');
     chipDragRef.current = {
       intent: 'pending',
       startX: e.clientX,
@@ -1431,10 +1642,11 @@ export default function FormulaBar() {
       adjustStartVal: adjustVal ?? 0,
       adjustStep: adjustStep ?? 0.01,
       adjustCb: adjustCb ?? null,
+      adjustOnly: isNumberTarget && !!adjustCb,
     };
   }, [suppressPopover]);
 
-  /* ── Drag-to-adjust helper ───────────────────────────────────── */
+  /* â”€â”€ Drag-to-adjust helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const dragState = useRef<{
     startY: number;
     startVal: number;
@@ -1472,7 +1684,7 @@ export default function FormulaBar() {
     dragState.current = { startY: e.clientY, startVal, step, onDelta };
   }, [suppressPopover]);
 
-  /* ── Mutate an AST number node and re-serialize into customFormula ── */
+  /* â”€â”€ Mutate an AST number node and re-serialize into customFormula â”€â”€ */
   const patchAstNumber = useCallback((node: AstNode, newVal: number) => {
     if (!visualAst) return;
     if (node.kind === 'number') node.value = newVal;
@@ -1481,7 +1693,7 @@ export default function FormulaBar() {
     setFormulaDraft(newFormula);
   }, [visualAst, setCustomFormula]);
 
-  /* ── Patch a single TF parameter in the store (standard visual mode) ── */
+  /* â”€â”€ Patch a single TF parameter in the store (standard visual mode) â”€â”€ */
   const patchTfParam = useCallback((id: LayerId, param: 'plateauEnd' | 'decayEnd', value: number) => {
     const c = configs;
     switch (id) {
@@ -1543,7 +1755,7 @@ export default function FormulaBar() {
     }
   }, [configs, updateConfig]);
 
-  /* ── Compact chip for a recognized TF term ───────────────────── */
+  /* â”€â”€ Compact chip for a recognized TF term â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const showParams = formulaMode === 'visual' || formulaMode === 'math'; // visual-short & math-short hide M,N
   const isMathMode = formulaMode === 'math-short' || formulaMode === 'math';
   const renderCompactChip = useCallback((
@@ -1564,7 +1776,7 @@ export default function FormulaBar() {
     const duplicateCount = layerId ? (duplicateTfLayers.find((d) => d.id === layerId)?.count ?? 0) : 0;
     const canSyncStore = !isCustom || duplicateCount <= 1;
     const chipCls = `fb-chip${isActive ? ' active' : ''}${isSolo ? ' solo' : ''}`;
-    const title = `${call.name}(${call.args.map((a) => a.kind === 'number' ? fmtN(a.value) : a.kind === 'identifier' ? a.name : '…').join(', ')})`;
+    const title = `${call.name}(${call.args.map((a) => a.kind === 'number' ? fmtN(a.value) : a.kind === 'identifier' ? a.name : 'â€¦').join(', ')})`;
 
     /* drag callbacks: always sync store configs; also patch AST in custom mode */
     const onWeightDrag = (v: number) => {
@@ -1633,23 +1845,23 @@ export default function FormulaBar() {
   }, [activeChipKey, duplicateTfLayers, ensureLayerEnabled, soloLayer, normalizedCustom, configs, setLayerWeight, patchAstNumber, patchTfParam, startDrag, handleChipHover, handleChipLeave, handleChipClick, showParams]);
 
   const renderVisualNode = useCallback((node: AstNode, key: string): React.ReactNode => {
-    /* ── Weighted TF term: w * SHAPE(var, M, N) → compact chip ── */
+    /* â”€â”€ Weighted TF term: w * SHAPE(var, M, N) â†’ compact chip â”€â”€ */
     const weighted = weightedTfTerm(node);
     if (weighted) {
       const layerId = varToLayerId.get(weighted.varName) ?? null;
       const layer = layerId ? layers.find((l) => l.id === layerId) : null;
-      return renderCompactChip(layerId, layer?.icon ?? 'ƒ', weighted.weightNode, weighted.weight, weighted.call, key);
+      return renderCompactChip(layerId, layer?.icon ?? 'Æ’', weighted.weightNode, weighted.weight, weighted.call, key);
     }
 
-    /* ── Bare TF call: SHAPE(var, M, N) without weight → chip w=1 ── */
+    /* â”€â”€ Bare TF call: SHAPE(var, M, N) without weight â†’ chip w=1 â”€â”€ */
     const tf = tfCallFromNode(node);
     if (tf) {
       const layerId = varToLayerId.get(tf.varName) ?? null;
       const layer = layerId ? layers.find((l) => l.id === layerId) : null;
-      return renderCompactChip(layerId, layer?.icon ?? 'ƒ', null, 1, tf.call, key);
+      return renderCompactChip(layerId, layer?.icon ?? 'Æ’', null, 1, tf.call, key);
     }
 
-    /* ── Comparison: var < N  →  visual badge ── */
+    /* â”€â”€ Comparison: var < N  â†’  visual badge â”€â”€ */
     const cmp = comparisonFromNode(node);
     if (cmp) {
       const layerId = varToLayerId.get(cmp.varName) ?? null;
@@ -1677,14 +1889,14 @@ export default function FormulaBar() {
       );
     }
 
-    /* ── Generic AST nodes ── */
+    /* â”€â”€ Generic AST nodes â”€â”€ */
     if (node.kind === 'number') {
       const numStep = Math.max(0.01, Math.abs(node.value) * 0.005);
       return (
         <span
           className="fb-ast-token fb-draggable-num"
           key={key}
-          title={`${fmtN(node.value)} — drag ↕ to adjust`}
+          title={`${fmtN(node.value)} â€” drag â†• to adjust`}
           onPointerDown={(e) => startDrag(e, node.value, (v) => patchAstNumber(node, parseFloat(v.toFixed(4))), numStep)}
         >
           {fmtN(node.value)}
@@ -1706,15 +1918,15 @@ export default function FormulaBar() {
         const inner = renderVisualNode(node.args[0], `${key}-arg0`);
         if (node.name === 'SQRT') {
           return (
-            <span className="fb-paren-group fb-radical" key={key} title="SQRT(…)">
-              <span className="fb-radical-sign">√</span>
+            <span className="fb-paren-group fb-radical" key={key} title="SQRT(â€¦)">
+              <span className="fb-radical-sign">âˆš</span>
               <span className="fb-radical-content">{inner}</span>
             </span>
           );
         }
         if (node.name === 'ABS') {
           return (
-            <span className="fb-paren-group fb-abs-wrap" key={key} title="ABS(…)">
+            <span className="fb-paren-group fb-abs-wrap" key={key} title="ABS(â€¦)">
               <span className="fb-abs-bar">|</span>
               {inner}
               <span className="fb-abs-bar">|</span>
@@ -1722,14 +1934,14 @@ export default function FormulaBar() {
           );
         }
         const MATH_FN_LABELS: Record<string, string> = {
-          LOG: 'log', LOG2: 'log₂', LOG10: 'log₁₀',
-          EXP: 'eˣ', SIGN: 'sgn', FLOOR: '⌊⌋', CEIL: '⌈⌉', ROUND: '≈',
+          LOG: 'log', LOG2: 'logâ‚‚', LOG10: 'logâ‚â‚€',
+          EXP: 'eË£', SIGN: 'sgn', FLOOR: 'âŒŠâŒ‹', CEIL: 'âŒˆâŒ‰', ROUND: 'â‰ˆ',
           COS: 'cos', SIN: 'sin', TAN: 'tan', ACOS: 'acos', ASIN: 'asin', ATAN: 'atan',
         };
         const mathLabel = MATH_FN_LABELS[node.name];
         if (mathLabel) {
           return (
-            <span className="fb-paren-group fb-math-fn" key={key} title={`${node.name}(…)`}>
+            <span className="fb-paren-group fb-math-fn" key={key} title={`${node.name}(â€¦)`}>
               <span className="fb-math-fn-label">{mathLabel}</span>
               <span className="fb-paren">(</span>
               {inner}
@@ -1767,14 +1979,16 @@ export default function FormulaBar() {
     return <span className="fb-ast-token" key={key}>?</span>;
   }, [activeChipKey, ensureLayerEnabled, handleChipClick, handleChipHover, handleChipLeave, isMathMode, layers, patchAstNumber, renderCompactChip, startDrag, varToLayerId]);
 
-  /* ── Render a SimpleTerm as a chip ───────────────────────────── */
+  /* â”€â”€ Render a SimpleTerm as a chip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const renderSimpleTerm = useCallback((term: SimpleTerm, chipKey: string, section: 'guard' | 'important' | 'sum', idx: number) => {
     const layerId = varToLayerId.get(term.varName) ?? null;
     const layer = layerId ? layers.find((l) => l.id === layerId) : null;
-    const icon = layer?.icon ?? 'ƒ';
+    const icon = layer?.icon ?? 'Æ’';
     const isActive = activeChipKey === chipKey;
     const isSolo = layerId != null && soloLayer === layerId;
-    const cls = `fb-chip${isActive ? ' active' : ''}${isSolo ? ' solo' : ''}`;
+    const sectionKey = section === 'important' ? 'important' : section;
+    const isDragging = dragReorder?.section === sectionKey && dragReorder?.fromIdx === idx;
+    const cls = `fb-chip${isActive ? ' active' : ''}${isSolo ? ' solo' : ''}${isDragging ? ' fb-chip-dragging' : ''}`;
     const title = `${term.fn}(${term.varName}, ${fmtN(term.M)}, ${fmtN(term.N)})`;
     const isDragTarget = dropTarget?.section === section && dropTarget?.idx === idx;
 
@@ -1836,15 +2050,29 @@ export default function FormulaBar() {
         )}
       </span>
     );
-  }, [activeChipKey, dropTarget, ensureLayerEnabled, handleChipClick, handleChipContextMenu, handleChipHover, handleChipLeave, layers, patchTfParam, setLayerWeight, showParams, soloLayer, startChipDrag, varToLayerId]);
+  }, [activeChipKey, dragReorder, dropTarget, ensureLayerEnabled, handleChipClick, handleChipContextMenu, handleChipHover, handleChipLeave, layers, patchTfParam, setLayerWeight, showParams, soloLayer, startChipDrag, varToLayerId]);
 
-  /* ── Render a guard chip (comparison) ────────────────────────── */
+  /* â”€â”€ Render a guard chip (comparison) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const renderGuardChip = useCallback((guard: { varName: string; op: string; value: number }, chipKey: string, idx: number) => {
     const layerId = varToLayerId.get(guard.varName) ?? null;
     const layer = layerId ? layers.find((l) => l.id === layerId) : null;
     const isActive = activeChipKey === chipKey;
     const isDragTarget = dropTarget?.section === 'guard' && dropTarget?.idx === idx;
     const cls = `fb-chip fb-cmp-chip${isActive ? ' active' : ''}${isDragTarget ? ' fb-drop-before' : ''}`;
+
+    /* Threshold-adjust callback: patches the guard's BinopNode.right.value,
+       rebuilds formula from sections. */
+    const onThresholdDrag = formulaSections ? (v: number) => {
+      const clamped = Math.max(0, parseFloat(v.toFixed(1)));
+      const nextGuards = formulaSections.guards.map((g, gi) => {
+        if (gi !== idx) return g;
+        return { ...g, right: { kind: 'number' as const, value: clamped } };
+      });
+      const nextFormula = buildFormulaFromSections({ ...formulaSections, guards: nextGuards });
+      setCustomFormula(nextFormula);
+      setFormulaDraft(nextFormula);
+    } : undefined;
+    const thresholdStep = Math.max(0.2, Math.abs(guard.value) * 0.002);
 
     return (
       <span
@@ -1856,7 +2084,13 @@ export default function FormulaBar() {
         }}
         onPointerDown={(e) => {
           if (e.button !== 0) return;
-          startChipDrag(e, 'guard', idx);
+          const target = e.target as HTMLElement;
+          const isVal = target.classList.contains('fb-cmp-val');
+          startChipDrag(e, 'guard', idx,
+            isVal ? guard.value : undefined,
+            isVal ? thresholdStep : undefined,
+            isVal ? onThresholdDrag : undefined,
+          );
         }}
         onMouseEnter={() => layerId && handleChipHover(chipKey, layerId)}
         onMouseLeave={handleChipLeave}
@@ -1868,9 +2102,9 @@ export default function FormulaBar() {
         <span className="fb-cmp-val">{fmtN(guard.value)}</span>
       </span>
     );
-  }, [activeChipKey, dropTarget, handleChipClick, handleChipContextMenu, handleChipHover, handleChipLeave, layers, startChipDrag, varToLayerId]);
+  }, [activeChipKey, buildFormulaFromSections, dropTarget, formulaSections, handleChipClick, handleChipContextMenu, handleChipHover, handleChipLeave, layers, setCustomFormula, startChipDrag, varToLayerId]);
 
-  /* ── Sectioned formula renderer ──────────────────────────────── */
+  /* -- Sectioned formula renderer ------------------------------------------------ */
   const renderSectionedFormula = useMemo(() => {
     if (!formulaSections) return null;
     const { guards, importantTerms, terms, totalWeight, extras, wrapper } = formulaSections;
@@ -1891,10 +2125,10 @@ export default function FormulaBar() {
     const hasSum = terms.length > 0;
     const hasInner = hasExtras || hasImportant || hasSum;
 
-    /* Inner content: everything the wrapper wraps (extras × important × sum/weights) */
+    /* Inner content: everything the wrapper wraps (extras x important x sum/weights) */
     const innerContent = hasInner ? (
       <>
-        {/* Extras section — arbitrary multiplicative factors from raw mode */}
+        {/* Extras section */}
         {hasExtras && (
           <span className="fb-section fb-section-extras">
             {extras.map((ex, i) => (
@@ -1906,14 +2140,15 @@ export default function FormulaBar() {
           </span>
         )}
 
-        {/* Section divider: extras × important/sum */}
+        {/* Section divider: extras x important/sum */}
         {hasExtras && (hasImportant || hasSum) && (
           <span className="fb-section-divider">×</span>
         )}
 
         {/* Important section */}
         {hasImportant && (
-          <span className="fb-section fb-section-important">
+          <span className={`fb-section fb-section-important${dropTarget?.section === 'important' ? ' fb-section-drop-target' : ''}`}
+            ref={(el) => { if (el) sectionElRefs.current.set('important', el); }}>
             {importantTerms.map((term, i) => (
               <span key={`imp-${i}`} className="fb-section-item">
                 {i > 0 && <span className="fb-op fb-section-op">×</span>}
@@ -1923,14 +2158,15 @@ export default function FormulaBar() {
           </span>
         )}
 
-        {/* Section divider: important × sum */}
+        {/* Section divider: important x sum */}
         {hasImportant && hasSum && (
           <span className="fb-section-divider">×</span>
         )}
 
-        {/* Sum section — wrapped in hoverable paren group */}
+        {/* Sum section */}
         {hasSum && (
-          <span className="fb-paren-group fb-section fb-section-sum">
+          <span className={`fb-paren-group fb-section fb-section-sum${dropTarget?.section === 'sum' ? ' fb-section-drop-target' : ''}`}
+            ref={(el) => { if (el) sectionElRefs.current.set('sum', el); }}>
             <span className="fb-paren">(</span>
             {terms.map((term, i) => (
               <span key={`sum-${i}`} className="fb-section-item">
@@ -1955,13 +2191,13 @@ export default function FormulaBar() {
       SQRT:  { render: 'radical' },
       ABS:   { render: 'abs' },
       LOG:   { render: 'fn', label: 'log' },
-      LOG2:  { render: 'fn', label: 'log₂' },
-      LOG10: { render: 'fn', label: 'log₁₀' },
-      EXP:   { render: 'fn', label: 'eˣ' },
+      LOG2:  { render: 'fn', label: 'log\u2082' },
+      LOG10: { render: 'fn', label: 'log\u2081\u2080' },
+      EXP:   { render: 'fn', label: 'e\u02e3' },
       SIGN:  { render: 'fn', label: 'sgn' },
-      FLOOR: { render: 'fn', label: '⌊⌋' },
-      CEIL:  { render: 'fn', label: '⌈⌉' },
-      ROUND: { render: 'fn', label: '≈' },
+      FLOOR: { render: 'fn', label: '\u230a\u230b' },
+      CEIL:  { render: 'fn', label: '\u2308\u2309' },
+      ROUND: { render: 'fn', label: '\u2248' },
       COS:   { render: 'fn', label: 'cos' },
       TAN:   { render: 'fn', label: 'tan' },
       ACOS:  { render: 'fn', label: 'acos' },
@@ -1971,9 +2207,10 @@ export default function FormulaBar() {
 
     return (
       <span className="fb-ast-formula fb-sectioned">
-        {/* Guard section — wrapped in hoverable paren group */}
+        {/* Guard section */}
         {hasGuards && (
-          <span className="fb-paren-group fb-section fb-section-guard">
+          <span className={`fb-paren-group fb-section fb-section-guard${dropTarget?.section === 'guard' ? ' fb-section-drop-target' : ''}`}
+            ref={(el) => { if (el) sectionElRefs.current.set('guard', el); }}>
             {guardInfos.map((g, i) => (
               <span key={`guard-${i}`} className="fb-section-item">
                 {i > 0 && <span className="fb-op fb-section-op">×</span>}
@@ -1983,28 +2220,28 @@ export default function FormulaBar() {
           </span>
         )}
 
-        {/* Section divider: guards × wrapper/inner */}
+        {/* Section divider: guards x wrapper/inner */}
         {hasGuards && hasInner && (
           <span className="fb-section-divider">×</span>
         )}
 
-        {/* Wrapper (SQRT, ABS, LOG, …) around inner content */}
+        {/* Wrapper (SQRT, ABS, LOG, \u2026) around inner content */}
         {wrapper && hasInner ? (
           isMathMode && MATH_WRAPPERS[wrapper.fn] ? (
-            /* Math rendering: √ with overline, |…|, fn(…) */
+            /* Math rendering: \u221a with overline, |\u2026|, fn(\u2026) */
             MATH_WRAPPERS[wrapper.fn].render === 'radical' ? (
-              <span className="fb-paren-group fb-section fb-section-wrapper fb-radical" title={`${wrapper.fn}(…)`}>
+              <span className="fb-paren-group fb-section fb-section-wrapper fb-radical" title={`${wrapper.fn}(\u2026)`}>
                 <span className="fb-radical-sign">√</span>
                 <span className="fb-radical-content">{innerContent}</span>
               </span>
             ) : MATH_WRAPPERS[wrapper.fn].render === 'abs' ? (
-              <span className="fb-paren-group fb-section fb-section-wrapper fb-abs-wrap" title={`${wrapper.fn}(…)`}>
+              <span className="fb-paren-group fb-section fb-section-wrapper fb-abs-wrap" title={`${wrapper.fn}(\u2026)`}>
                 <span className="fb-abs-bar">|</span>
                 {innerContent}
                 <span className="fb-abs-bar">|</span>
               </span>
             ) : (
-              <span className="fb-paren-group fb-section fb-section-wrapper fb-math-fn" title={`${wrapper.fn}(…)`}>
+              <span className="fb-paren-group fb-section fb-section-wrapper fb-math-fn" title={`${wrapper.fn}(\u2026)`}>
                 <span className="fb-math-fn-label">{MATH_WRAPPERS[wrapper.fn].label}</span>
                 <span className="fb-paren">(</span>
                 {innerContent}
@@ -2012,7 +2249,7 @@ export default function FormulaBar() {
               </span>
             )
           ) : (
-            /* Standard rendering: FN( … ) */
+            /* Standard rendering: FN( \u2026 ) */
             <span className="fb-paren-group fb-section fb-section-wrapper">
               <span className="fb-wrapper-fn">{wrapper.fn}</span>
               <span className="fb-paren">(</span>
@@ -2025,9 +2262,9 @@ export default function FormulaBar() {
         )}
       </span>
     );
-  }, [formulaSections, isMathMode, renderGuardChip, renderSimpleTerm, renderVisualNode]);
+  }, [dragReorder, dropTarget, formulaSections, isMathMode, renderGuardChip, renderSimpleTerm, renderVisualNode]);
 
-  /* ── Close popover on outside click (hover or pinned) ────────── */
+  /* â”€â”€ Close popover on outside click (hover or pinned) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   useEffect(() => {
     if (!activeChip) return;
     const handler = (e: MouseEvent) => {
@@ -2040,7 +2277,7 @@ export default function FormulaBar() {
     return () => document.removeEventListener('mousedown', handler);
   }, [activeChip]);
 
-  /* ── Close view dropdown on outside click ────────────────────── */
+  /* â”€â”€ Close view dropdown on outside click â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   useEffect(() => {
     if (!viewOpen) return;
     const handler = (e: MouseEvent) => {
@@ -2050,7 +2287,7 @@ export default function FormulaBar() {
     return () => document.removeEventListener('mousedown', handler);
   }, [viewOpen]);
 
-  // ── Auto-sync formula draft with visual state in Raw mode ───
+  // â”€â”€ Auto-sync formula draft with visual state in Raw mode â”€â”€â”€
   // When the user hasn't manually edited the formula (it still matches the
   // previous auto-generated formula), keep the textarea draft in sync with
   // visual changes. Do NOT write into store here, otherwise Apply can be
@@ -2060,7 +2297,7 @@ export default function FormulaBar() {
     if (formulaMode === 'raw') {
       const prev = prevVisualRef.current;
       // If the stored formula matches the previous auto-generated one,
-      // it wasn't manually edited — auto-sync textarea only.
+      // it wasn't manually edited â€” auto-sync textarea only.
       const stored = normalizeUserFormulaInput(customFormula);
       if (stored === prev || !stored) {
         setFormulaDraft(visualRawFormula);
@@ -2091,7 +2328,7 @@ export default function FormulaBar() {
 
   return (
     <>
-      {/* ── Editing popover ──────────────────────────────────────── */}
+      {/* â”€â”€ Editing popover â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {activeLayer && (
         <EditPopover
           layer={activeLayer}
@@ -2100,6 +2337,7 @@ export default function FormulaBar() {
           pinned={!!pinnedChip}
           duplicateCount={activeDuplicateCount}
           canChangeTier={!normalizedCustom || (!!formulaSections && formulaSections.extras.length === 0)}
+          onTierChange={activeChipKey ? (tier) => handleTierChange(activeLayer.id, activeChipKey, tier) : undefined}
           onPin={handlePopoverPin}
           onClose={handlePopoverClose}
           onRemove={handlePopoverRemove}
@@ -2109,7 +2347,7 @@ export default function FormulaBar() {
         />
       )}
 
-      {/* ── Context menu (right-click on chip) ───────────────────── */}
+      {/* â”€â”€ Context menu (right-click on chip) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {contextMenu && (
         <div
           className="fb-context-menu"
@@ -2118,26 +2356,26 @@ export default function FormulaBar() {
         >
           {contextMenu.section !== 'guard' && (
             <button className="fb-context-item" onClick={() => handleContextAction('mandatory')}>
-              🛡 Make mandatory
+              ðŸ›¡ Make mandatory
             </button>
           )}
           {contextMenu.section !== 'important' && (
             <button className="fb-context-item" onClick={() => handleContextAction('important')}>
-              ⭐ Make important
+              â­ Make important
             </button>
           )}
           {contextMenu.section !== 'sum' && (
             <button className="fb-context-item" onClick={() => handleContextAction('sum')}>
-              Σ Move to sum
+              Î£ Move to sum
             </button>
           )}
           <button className="fb-context-item fb-context-remove" onClick={() => handleContextAction('remove')}>
-            × Remove
+            Ã— Remove
           </button>
         </div>
       )}
 
-      {/* ── Formula bar ──────────────────────────────────────────── */}
+      {/* â”€â”€ Formula bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className={`formula-bar ${collapsed ? 'collapsed' : ''}`}>
         <button className="formula-bar-toggle"
           onClick={handleToggleCollapsed}>
@@ -2153,7 +2391,7 @@ export default function FormulaBar() {
               onClick={() => setFormulaOpen((v) => !v)}
               title="Edit score formula"
             >
-              ƒx
+              Æ’x
             </button>
             {formulaOpen && (
               <div className="fb-formula-editor" onMouseDown={(e) => e.stopPropagation()}>
@@ -2176,14 +2414,14 @@ export default function FormulaBar() {
                     onClick={() => setFormulaMode('math-short')}
                     title="Math notation (compact)"
                   >
-                    Math ∑
+                    Math âˆ‘
                   </button>
                   <button
                     className={`fb-formula-mode-btn ${formulaMode === 'math' ? 'active' : ''}`}
                     onClick={() => setFormulaMode('math')}
                     title="Math notation (full params)"
                   >
-                    Math ƒ
+                    Math Æ’
                   </button>
                   <button
                     className={`fb-formula-mode-btn ${formulaMode === 'raw' ? 'active' : ''}`}
@@ -2205,7 +2443,7 @@ export default function FormulaBar() {
                       onChange={(e) => setFormulaDraft(normalizeUserFormulaInput(e.target.value))}
                     />
                     {!formulaValidation.ok && (
-                      <div className="fb-formula-error">⚠ {formulaValidation.error || 'Invalid formula'}</div>
+                      <div className="fb-formula-error">âš  {formulaValidation.error || 'Invalid formula'}</div>
                     )}
                     <div className="fb-formula-actions">
                       <button
@@ -2263,7 +2501,7 @@ export default function FormulaBar() {
           {/* Solo indicator */}
           {soloLayer && (
             <span className="fb-solo-badge">
-              ◎ {layers.find((l) => l.id === soloLayer)?.icon}
+              â—Ž {layers.find((l) => l.id === soloLayer)?.icon}
             </span>
           )}
 
@@ -2272,7 +2510,7 @@ export default function FormulaBar() {
             <button className="fb-view-btn"
               onClick={() => setViewOpen(!viewOpen)}
               title="Map settings">
-              ⚙
+              âš™
             </button>
             {viewOpen && <ViewMenuDropdown anchorRef={viewWrapRef} />}
           </div>
