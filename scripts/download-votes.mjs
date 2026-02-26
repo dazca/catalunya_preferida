@@ -30,11 +30,42 @@ const INDEPENDENCE_PARTIES = [
 ];
 
 /**
+ * Major party classification — maps sigles_candidatura patterns to canonical keys.
+ * Order matters: first match wins.
+ */
+const PARTY_MAP = [
+  { key: 'ERC',    patterns: ['erc', 'esquerra republicana'] },
+  { key: 'CUP',    patterns: ['cup', 'candidatura d\'unitat popular'] },
+  { key: 'PODEM',  patterns: ['podem', 'podemos', 'sumar'] },
+  { key: 'JUNTS',  patterns: ['junts', 'jxcat', 'junts per catalunya'] },
+  { key: 'COMUNS', patterns: ['comuns', 'en comú', 'bcomú', 'barcelona en comú'] },
+  { key: 'PP',     patterns: ['partido popular', 'pp'] },
+  { key: 'VOX',    patterns: ['vox'] },
+  { key: 'PSC',    patterns: ['psc', 'socialistes', 'partit dels socialistes'] },
+  // Minor parties
+  { key: 'Cs',     patterns: ['ciutadans', 'ciudadanos', 'cs'] },
+  { key: 'PDeCAT', patterns: ['pdecat', 'partit demòcrata'] },
+  { key: 'CiU',    patterns: ['ciu', 'convergència i unió'] },
+];
+
+/**
  * Check if a candidature name matches a party list (case-insensitive partial match).
  */
 function matchesParty(candidatura, partyList) {
   const lower = candidatura.toLowerCase();
   return partyList.some(p => lower.includes(p));
+}
+
+/**
+ * Classify a candidature sigles into a canonical party key.
+ * Returns the key (e.g. 'ERC') or 'OTHER' if unrecognised.
+ */
+function classifyParty(candidatura) {
+  const lower = candidatura.toLowerCase();
+  for (const { key, patterns } of PARTY_MAP) {
+    if (patterns.some(p => lower.includes(p))) return key;
+  }
+  return 'OTHER';
 }
 
 /**
@@ -101,7 +132,7 @@ async function main() {
       if (!codi || !candidatura) continue;
 
       if (!byMunicipality[codi]) {
-        byMunicipality[codi] = { codi, nom, year, totalVotes: 0, leftVotes: 0, independenceVotes: 0 };
+        byMunicipality[codi] = { codi, nom, year, totalVotes: 0, leftVotes: 0, independenceVotes: 0, partyVotes: {} };
       }
 
       const muni = byMunicipality[codi];
@@ -116,19 +147,32 @@ async function main() {
       if (matchesParty(candidatura, INDEPENDENCE_PARTIES)) {
         muni.independenceVotes += vots;
       }
+
+      // Per-party aggregation
+      const partyKey = classifyParty(candidatura);
+      muni.partyVotes[partyKey] = (muni.partyVotes[partyKey] || 0) + vots;
     }
 
     // Convert to sentiment array
-    const sentiment = Object.values(byMunicipality).map(m => ({
-      codi: m.codi,
-      nom: m.nom,
-      leftPct: m.totalVotes > 0 ? Math.round((m.leftVotes / m.totalVotes) * 10000) / 100 : 0,
-      rightPct: m.totalVotes > 0 ? Math.round(((m.totalVotes - m.leftVotes) / m.totalVotes) * 10000) / 100 : 0,
-      independencePct: m.totalVotes > 0 ? Math.round((m.independenceVotes / m.totalVotes) * 10000) / 100 : 0,
-      unionistPct: m.totalVotes > 0 ? Math.round(((m.totalVotes - m.independenceVotes) / m.totalVotes) * 10000) / 100 : 0,
-      turnoutPct: 0, // would need participation dataset
-      year: m.year,
-    }));
+    const sentiment = Object.values(byMunicipality).map(m => {
+      // Build partyPcts record
+      const partyPcts = {};
+      for (const [key, votes] of Object.entries(m.partyVotes)) {
+        partyPcts[key] = m.totalVotes > 0 ? Math.round((votes / m.totalVotes) * 10000) / 100 : 0;
+      }
+
+      return {
+        codi: m.codi,
+        nom: m.nom,
+        leftPct: m.totalVotes > 0 ? Math.round((m.leftVotes / m.totalVotes) * 10000) / 100 : 0,
+        rightPct: m.totalVotes > 0 ? Math.round(((m.totalVotes - m.leftVotes) / m.totalVotes) * 10000) / 100 : 0,
+        independencePct: m.totalVotes > 0 ? Math.round((m.independenceVotes / m.totalVotes) * 10000) / 100 : 0,
+        unionistPct: m.totalVotes > 0 ? Math.round(((m.totalVotes - m.independenceVotes) / m.totalVotes) * 10000) / 100 : 0,
+        turnoutPct: 0, // would need participation dataset
+        year: m.year,
+        partyPcts,
+      };
+    });
 
     const outPath = join(outDir, 'municipal_sentiment.json');
     writeFileSync(outPath, JSON.stringify(sentiment, null, 2));

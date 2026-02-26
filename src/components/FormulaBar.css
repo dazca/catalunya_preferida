@@ -816,6 +816,13 @@
   box-shadow: 4px 0 24px rgba(0,0,0,0.6);
   z-index: 2600;
 }
+/* Nested submenus (depth 1+) inherit same positioning */
+.fb-add-submenu .fb-add-submenu {
+  z-index: 2700;
+}
+.fb-add-submenu .fb-add-submenu .fb-add-submenu {
+  z-index: 2800;
+}
 
 /* ================================================================== */
 /*  Solo badge in bar                                                  */

@@ -13,6 +13,22 @@ export type LayerId =
   | 'votesIndep'
   | 'votesUnionist'
   | 'votesTurnout'
+  // Party vote layers — major
+  | 'votesERC'
+  | 'votesCUP'
+  | 'votesPODEM'
+  | 'votesJUNTS'
+  | 'votesCOMUNS'
+  | 'votesPP'
+  | 'votesVOX'
+  | 'votesPSC'
+  // Party vote layers — minor (Others)
+  | 'votesCs'
+  | 'votesPDeCAT'
+  | 'votesCiU'
+  | 'votesOtherParties'
+  // Political axis layers (auto-derived from POLITICAL_AXES registry)
+  | `axis_${string}`
   | 'transit'
   | 'forest'
   | 'soil'
@@ -89,6 +105,10 @@ export interface VoteSentiment {
   unionistPct: number;
   turnoutPct: number;
   year: number;
+  /** Per-party vote percentages (e.g. { ERC: 25.3, PSC: 18.1, ... }) */
+  partyPcts?: Record<string, number>;
+  /** Per-axis sentiment scores (computed at runtime from partyPcts × axis weights) */
+  axisPcts?: Record<string, number>;
 }
 
 /** Climate stats per municipality */

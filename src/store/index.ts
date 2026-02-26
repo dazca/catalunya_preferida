@@ -10,6 +10,7 @@ import type { LayerId, LayerMeta } from '../types';
 import type { LayerConfigs, VoteTerm } from '../types/transferFunction';
 import { DEFAULT_LAYER_CONFIGS, defaultTf } from '../types/transferFunction';
 import { DEFAULT_CUSTOM_FORMULA, normalizeUserFormulaInput } from '../utils/formulaEngine';
+import { POLITICAL_AXES, axisLayerId, buildDefaultAxisConfigs } from '../utils/politicalAxes';
 import { DEFAULT_INTEGRITY_RULES, runDataIntegrityChecks } from '../utils/dataIntegrity';
 import type { DataIntegrityInput, IntegrityReport, IntegrityRules } from '../utils/dataIntegrity';
 import type { Lang } from '../i18n';
@@ -95,6 +96,29 @@ export const DEFAULT_LAYERS: LayerMeta[] = [
   { id: 'votesIndep', label: 'Independence %', description: 'Pro-independence vote share', icon: '🎗', enabled: false, weight: 0.5 },
   { id: 'votesUnionist', label: 'Unionist %', description: 'Unionist vote share', icon: '🤝', enabled: false, weight: 0.5 },
   { id: 'votesTurnout', label: 'Turnout %', description: 'Voter turnout', icon: '🗳', enabled: false, weight: 0.5 },
+  // Party vote sub-layers — major
+  { id: 'votesERC', label: 'ERC %', description: 'Esquerra Republicana vote share', icon: '🟡', enabled: false, weight: 0.5 },
+  { id: 'votesCUP', label: 'CUP %', description: 'CUP vote share', icon: '🟣', enabled: false, weight: 0.5 },
+  { id: 'votesPODEM', label: 'Podem %', description: 'Podem vote share', icon: '🟢', enabled: false, weight: 0.5 },
+  { id: 'votesJUNTS', label: 'Junts %', description: 'Junts per Catalunya vote share', icon: '🔵', enabled: false, weight: 0.5 },
+  { id: 'votesCOMUNS', label: 'Comuns %', description: 'En Comú Podem vote share', icon: '💜', enabled: false, weight: 0.5 },
+  { id: 'votesPP', label: 'PP %', description: 'Partido Popular vote share', icon: '🔷', enabled: false, weight: 0.5 },
+  { id: 'votesVOX', label: 'Vox %', description: 'Vox vote share', icon: '🟩', enabled: false, weight: 0.5 },
+  { id: 'votesPSC', label: 'PSC %', description: 'Partit dels Socialistes vote share', icon: '🌹', enabled: false, weight: 0.5 },
+  // Party vote sub-layers — minor (Others)
+  { id: 'votesCs', label: 'Cs %', description: 'Ciutadans vote share', icon: '🟠', enabled: false, weight: 0.5 },
+  { id: 'votesPDeCAT', label: 'PDeCAT %', description: 'PDeCAT vote share', icon: '📘', enabled: false, weight: 0.5 },
+  { id: 'votesCiU', label: 'CiU %', description: 'Convergència i Unió vote share', icon: '📙', enabled: false, weight: 0.5 },
+  { id: 'votesOtherParties', label: 'Altres %', description: 'All other parties combined', icon: '📋', enabled: false, weight: 0.5 },
+  // Political axis layers (auto-derived from POLITICAL_AXES registry)
+  ...POLITICAL_AXES.map(a => ({
+    id: axisLayerId(a.id),
+    label: a.labelEN,
+    description: a.descEN,
+    icon: a.icon,
+    enabled: false,
+    weight: 0.5,
+  } as LayerMeta)),
   // Simple layers
   { id: 'transit', label: 'Public Transit', description: 'Rail, metro, bus proximity', icon: '🚆', enabled: true, weight: 1 },
   { id: 'forest', label: 'Forest Cover', description: 'Vegetation and green areas', icon: '🌲', enabled: true, weight: 1 },
@@ -188,7 +212,7 @@ export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       layers: DEFAULT_LAYERS,
-      configs: DEFAULT_LAYER_CONFIGS,
+      configs: { ...DEFAULT_LAYER_CONFIGS, axisConfigs: buildDefaultAxisConfigs() },
       view: DEFAULT_VIEW,
       selectedMunicipality: null,
       sidebarOpen: true,
@@ -292,9 +316,33 @@ export const useAppStore = create<AppState>()(
       resetIntegrityRules: () => set({ integrityRules: DEFAULT_INTEGRITY_RULES }),
 
       runIntegrityChecks: (input) => {
-        const report = runDataIntegrityChecks(input, get().integrityRules);
+        const safeInput: DataIntegrityInput = {
+          municipalities: input.municipalities ?? null,
+          municipalityData: {
+            terrain: input.municipalityData?.terrain ?? {},
+            votes: input.municipalityData?.votes ?? {},
+            forest: input.municipalityData?.forest ?? {},
+            crime: input.municipalityData?.crime ?? {},
+            rentalPrices: input.municipalityData?.rentalPrices ?? {},
+            employment: input.municipalityData?.employment ?? {},
+            climate: input.municipalityData?.climate ?? {},
+            airQuality: input.municipalityData?.airQuality ?? {},
+            internet: input.municipalityData?.internet ?? {},
+            transitDistKm: input.municipalityData?.transitDistKm ?? {},
+            healthcareDistKm: input.municipalityData?.healthcareDistKm ?? {},
+            schoolDistKm: input.municipalityData?.schoolDistKm ?? {},
+            amenityDistKm: input.municipalityData?.amenityDistKm ?? {},
+          },
+          transitStops: input.transitStops ?? null,
+          healthFacilities: input.healthFacilities ?? null,
+          schools: input.schools ?? null,
+          amenities: input.amenities ?? null,
+          rawArrays: input.rawArrays,
+        };
+
+        const report = runDataIntegrityChecks(safeInput, get().integrityRules);
         const municipalitiesCount = input.municipalities?.features.length ?? 0;
-        const signature = `${municipalitiesCount}:${Object.keys(input.municipalityData.votes).length}:${Object.keys(input.municipalityData.terrain).length}`;
+        const signature = `${municipalitiesCount}:${Object.keys(safeInput.municipalityData.votes).length}:${Object.keys(safeInput.municipalityData.terrain).length}`;
         set({ integrityReport: report, integrityLastSignature: signature });
         return report;
       },
@@ -354,7 +402,7 @@ export const useAppStore = create<AppState>()(
       resetToDefaults: () =>
         set({
           layers: DEFAULT_LAYERS,
-          configs: DEFAULT_LAYER_CONFIGS,
+          configs: { ...DEFAULT_LAYER_CONFIGS, axisConfigs: buildDefaultAxisConfigs() },
           soloLayer: null,
           customFormula: DEFAULT_CUSTOM_FORMULA,
           formulaMode: 'visual-short',
@@ -368,7 +416,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'better-idealista-config',
-      version: 8,
+      version: 11,
       // Persist everything except transient UI state
       partialize: (state) => ({
         layers: state.layers,
@@ -378,6 +426,8 @@ export const useAppStore = create<AppState>()(
         formulaMode: state.formulaMode,
         layerOrder: state.layerOrder,
         integrityRules: state.integrityRules,
+        integrityReport: state.integrityReport,
+        integrityLastSignature: state.integrityLastSignature,
         dataIntegrityPanelOpen: state.dataIntegrityPanelOpen,
         presets: state.presets,
         sidebarOpen: state.sidebarOpen,
@@ -588,6 +638,67 @@ export const useAppStore = create<AppState>()(
           if (!state.layerOrder || !Array.isArray(state.layerOrder)) {
             const ls = state.layers as Array<{ id: string; enabled?: boolean }> | undefined;
             state.layerOrder = ls ? ls.filter(l => l.enabled).map(l => l.id) : [];
+          }
+        }
+
+        // ── v8 → v9: add new integrity rule booleans ────────────
+        if (version < 9) {
+          const rules = state.integrityRules as Record<string, unknown> | undefined;
+          if (rules && typeof rules === 'object') {
+            if (typeof rules.crossLayerCheck !== 'boolean') rules.crossLayerCheck = true;
+            if (typeof rules.coordBoundsCheck !== 'boolean') rules.coordBoundsCheck = true;
+            if (typeof rules.brokenRefCheck !== 'boolean') rules.brokenRefCheck = true;
+            if (typeof rules.duplicateCodiCheck !== 'boolean') rules.duplicateCodiCheck = true;
+          }
+        }
+
+        // ── v9 → v10: add party vote layers + partyVotes config ──
+        if (version < 10) {
+          // Merge any missing DEFAULT_LAYERS entries into persisted layers
+          const ls = state.layers as Array<{ id: string }> | undefined;
+          if (ls) {
+            const existingIds = new Set(ls.map(l => l.id));
+            for (const dl of DEFAULT_LAYERS) {
+              if (!existingIds.has(dl.id)) {
+                ls.push({ ...dl } as unknown as { id: string });
+              }
+            }
+          }
+          // Ensure partyVotes config exists
+          const cfgs = state.configs as Record<string, unknown> | undefined;
+          if (cfgs && !cfgs.partyVotes) {
+            cfgs.partyVotes = DEFAULT_LAYER_CONFIGS.partyVotes;
+          }
+        }
+        // ── v10 → v11: add political axis layers + axisConfigs ──
+        if (version < 11) {
+          const ls = state.layers as Array<{ id: string }> | undefined;
+          if (ls) {
+            const existingIds = new Set(ls.map(l => l.id));
+            for (const dl of DEFAULT_LAYERS) {
+              if (!existingIds.has(dl.id)) {
+                ls.push({ ...dl } as unknown as { id: string });
+              }
+            }
+          }
+          const cfgs = state.configs as Record<string, unknown> | undefined;
+          if (cfgs && !cfgs.axisConfigs) {
+            cfgs.axisConfigs = buildDefaultAxisConfigs();
+          }
+        }
+        // ── v10 → v11: persist integrity report safely ──────────
+        if (version < 11) {
+          const report = state.integrityReport as Record<string, unknown> | null | undefined;
+          if (report && typeof report === 'object') {
+            if (!Array.isArray(report.layerStats)) report.layerStats = [];
+            if (!report.coverageByLayer || typeof report.coverageByLayer !== 'object') {
+              report.coverageByLayer = {};
+            }
+          } else {
+            state.integrityReport = null;
+          }
+          if (typeof state.integrityLastSignature !== 'string') {
+            state.integrityLastSignature = null;
           }
         }
 

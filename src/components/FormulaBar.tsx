@@ -31,6 +31,7 @@ import { parseFormula, serializeAst, walkAst, type AstNode, type CallNode } from
 import { detectSimpleStructure, type SimpleStructure, type SimpleTerm } from '../utils/formulaParser';
 import CurveEditor from './CurveEditor';
 import WindRoseEditor from './WindRoseEditor';
+import { POLITICAL_AXES, axisLayerId, axisIdFromLayerId, isAxisLayer } from '../utils/politicalAxes';
 import './FormulaBar.css';
 
 /** Mapping from vote sub-layer IDs to their VoteMetric key. */
@@ -40,7 +41,26 @@ const VOTE_ID_TO_METRIC: Record<string, VoteMetric> = {
   votesIndep: 'independencePct',
   votesUnionist: 'unionistPct',
   votesTurnout: 'turnoutPct',
+  // Party layers
+  votesERC: 'ercPct',
+  votesCUP: 'cupPct',
+  votesPODEM: 'podemPct',
+  votesJUNTS: 'juntsPct',
+  votesCOMUNS: 'comunsPct',
+  votesPP: 'ppPct',
+  votesVOX: 'voxPct',
+  votesPSC: 'pscPct',
+  votesCs: 'csPct',
+  votesPDeCAT: 'pdecatPct',
+  votesCiU: 'ciuPct',
+  votesOtherParties: 'otherPartiesPct',
 };
+
+/** Set of party-layer IDs (use partyVotes.terms instead of votes.terms). */
+const PARTY_LAYER_IDS = new Set<string>([
+  'votesERC','votesCUP','votesPODEM','votesJUNTS','votesCOMUNS',
+  'votesPP','votesVOX','votesPSC','votesCs','votesPDeCAT','votesCiU','votesOtherParties',
+]);
 
 const TF_FN_NAMES = new Set(['SIN', 'INVSIN', 'RANGE', 'INVRANGE']);
 
@@ -139,6 +159,18 @@ const METRIC_LABELS: Record<VoteMetric, string> = {
   independencePct: 'Indep %',
   unionistPct: 'Unionist %',
   turnoutPct: 'Turnout %',
+  ercPct: 'ERC %',
+  cupPct: 'CUP %',
+  podemPct: 'Podem %',
+  juntsPct: 'Junts %',
+  comunsPct: 'Comuns %',
+  ppPct: 'PP %',
+  voxPct: 'Vox %',
+  pscPct: 'PSC %',
+  csPct: 'Cs %',
+  pdecatPct: 'PDeCAT %',
+  ciuPct: 'CiU %',
+  otherPartiesPct: 'Others %',
 };
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -325,6 +357,33 @@ function LayerEditorContent({ layerId, canChangeTier = true, onTierChange }: { l
         }}
         rangeMax={100} unit="%" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
     }
+    // Party vote layers
+    case 'votesERC':
+    case 'votesCUP':
+    case 'votesPODEM':
+    case 'votesJUNTS':
+    case 'votesCOMUNS':
+    case 'votesPP':
+    case 'votesVOX':
+    case 'votesPSC':
+    case 'votesCs':
+    case 'votesPDeCAT':
+    case 'votesCiU':
+    case 'votesOtherParties': {
+      const metric = VOTE_ID_TO_METRIC[layerId];
+      const term = configs.partyVotes.terms.find((tm) => tm.metric === metric);
+      if (!term) return null;
+      return <TfControls
+        label={METRIC_LABELS[metric]}
+        ltc={term.value}
+        onChange={(ltc) => {
+          const terms = configs.partyVotes.terms.map((tm) =>
+            tm.metric === metric ? { ...tm, value: ltc } : tm,
+          );
+          updateConfig('partyVotes', { terms });
+        }}
+        rangeMax={100} unit="%" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
+    }
     case 'transit':
       return <TfControls label={t('fc.transit.dist')} ltc={configs.transit}
         onChange={(ltc) => updateConfig('transit', ltc)} rangeMax={50} unit="km" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
@@ -368,8 +427,22 @@ function LayerEditorContent({ layerId, canChangeTier = true, onTierChange }: { l
     case 'amenities':
       return <TfControls label={t('fc.amenities.dist')} ltc={configs.amenities}
         onChange={(ltc) => updateConfig('amenities', ltc)} rangeMax={50} unit="km" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
-    default:
+    default: {
+      // Political axis layers — handled dynamically from registry
+      const axisId = axisIdFromLayerId(layerId);
+      if (axisId) {
+        const ltc = configs.axisConfigs?.[axisId];
+        if (!ltc) return null;
+        const axis = POLITICAL_AXES.find(a => a.id === axisId);
+        const label = axis ? (t(`layer.axis_${axisId}.label` as keyof Translations) || axis.labelEN) : axisId;
+        return <TfControls
+          label={label}
+          ltc={ltc}
+          onChange={(next) => updateConfig('axisConfigs', { ...configs.axisConfigs, [axisId]: next })}
+          rangeMax={100} unit="%" canChangeTier={canChangeTier} onTierChange={onTierChange} />;
+      }
       return null;
+    }
   }
 }
 
@@ -506,10 +579,32 @@ function EditPopover({
    AddLayerButton – [+] dropdown with hierarchical submenu groups.
    ═══════════════════════════════════════════════════════════════════════ */
 
+/** Recursive group entry: ids are direct items, subGroups are nested. */
+interface AddLayerGroupEntry {
+  groupLabel: string;
+  groupIcon: string;
+  ids: LayerId[];
+  subGroups?: AddLayerGroupEntry[];
+}
+
 /** Groups that get a hover-submenu in the [+] dropdown. */
-const ADD_LAYER_GROUPS: { groupLabel: string; groupIcon: string; ids: LayerId[] }[] = [
+const ADD_LAYER_GROUPS: AddLayerGroupEntry[] = [
   { groupLabel: 'Terrain', groupIcon: '⛰', ids: ['terrainSlope', 'terrainElevation', 'terrainAspect'] },
-  { groupLabel: 'Vote Sentiment', groupIcon: '🗳', ids: ['votesLeft', 'votesRight', 'votesIndep', 'votesUnionist', 'votesTurnout'] },
+  {
+    groupLabel: 'Vote Sentiment', groupIcon: '🗳',
+    ids: ['votesLeft', 'votesRight', 'votesIndep', 'votesUnionist', 'votesTurnout'],
+    subGroups: [{
+      groupLabel: 'Partits', groupIcon: '🏛',
+      ids: ['votesERC', 'votesCUP', 'votesPODEM', 'votesJUNTS', 'votesCOMUNS', 'votesPP', 'votesVOX', 'votesPSC'],
+      subGroups: [{
+        groupLabel: 'Altres', groupIcon: '📋',
+        ids: ['votesCs', 'votesPDeCAT', 'votesCiU', 'votesOtherParties'],
+      }],
+    }, {
+      groupLabel: 'Eixos', groupIcon: '🎯',
+      ids: POLITICAL_AXES.map(a => axisLayerId(a.id)),
+    }],
+  },
   { groupLabel: 'Air Quality', groupIcon: '🌬', ids: ['airQualityPm10', 'airQualityNo2'] },
   { groupLabel: 'Climate', groupIcon: '☀', ids: ['climateTemp', 'climateRainfall'] },
 ];
@@ -563,6 +658,65 @@ function AddLayerButton({
     setHoveredGroup(null);
   };
 
+  /** Render a single layer item button. */
+  const renderItem = (id: LayerId) => {
+    const l = layerMap.get(id);
+    if (!l) return null;
+    const isAdded = enabledSet.has(id);
+    const disabled = isAdded && !allowDuplicateAdds;
+    return (
+      <button key={id} className={`fb-add-dropdown-item ${isAdded ? 'is-added' : ''}`}
+        onClick={() => { if (!disabled) { onAdd(id); setOpen(false); } }}
+        disabled={disabled}
+        title={disabled ? 'Already added' : isAdded ? 'Add again' : ''}>
+        <span className="fb-dd-icon">{l.icon}</span>
+        {t(`layer.${id}.label` as keyof Translations) || l.label}
+        {isAdded && <span className="fb-add-check">{allowDuplicateAdds ? `+${varTfCounts?.get(id) ?? 1}` : '✓'}</span>}
+      </button>
+    );
+  };
+
+  /** Recursively render a subgroup with hover-reveal submenu. */
+  const NestedSubGroup = ({ group, depth }: { group: AddLayerGroupEntry; depth: number }) => {
+    const [hovered, setHovered] = useState(false);
+    const [hoveredChild, setHoveredChild] = useState<number | null>(null);
+    return (
+      <div className="fb-add-group"
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => { setHovered(false); setHoveredChild(null); }}>
+        <div className="fb-add-group-label">
+          <span className="fb-dd-icon">{group.groupIcon}</span>
+          {t(`layer.${group.groupLabel === 'Partits' ? 'votesParties' : group.groupLabel === 'Altres' ? 'votesOthers' : group.groupLabel === 'Eixos' ? 'votesAxes' : group.groupLabel}.label` as keyof Translations) || group.groupLabel}
+          <span className="fb-add-group-arrow">▸</span>
+        </div>
+        {hovered && (
+          <div className={`fb-add-submenu fb-add-submenu-depth-${depth}`}>
+            {group.ids.map(renderItem)}
+            {group.subGroups?.map((sg, si) => (
+              <div key={si} className="fb-add-group"
+                onMouseEnter={() => setHoveredChild(si)}
+                onMouseLeave={() => setHoveredChild(null)}>
+                <div className="fb-add-group-label">
+                  <span className="fb-dd-icon">{sg.groupIcon}</span>
+                  {t(`layer.${sg.groupLabel === 'Partits' ? 'votesParties' : sg.groupLabel === 'Altres' ? 'votesOthers' : sg.groupLabel === 'Eixos' ? 'votesAxes' : sg.groupLabel}.label` as keyof Translations) || sg.groupLabel}
+                  <span className="fb-add-group-arrow">▸</span>
+                </div>
+                {hoveredChild === si && (
+                  <div className={`fb-add-submenu fb-add-submenu-depth-${depth + 1}`}>
+                    {sg.ids.map(renderItem)}
+                    {sg.subGroups?.map((ssg, ssi) => (
+                      <NestedSubGroup key={ssi} group={ssg} depth={depth + 2} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="fb-add-wrap" ref={ref}>
       <button className="fb-add-btn" ref={btnRef}
@@ -577,6 +731,7 @@ function AddLayerButton({
 
           {/* Group entries with hover submenus */}
           {ADD_LAYER_GROUPS.map((group, gi) => {
+            const hasSubGroups = group.subGroups && group.subGroups.length > 0;
             return (
               <div key={gi} className="fb-add-group"
                 onMouseEnter={() => setHoveredGroup(gi)}
@@ -588,26 +743,10 @@ function AddLayerButton({
                 </div>
                 {hoveredGroup === gi && (
                   <div className="fb-add-submenu">
-                    {group.ids.map((id) => {
-                      const l = layerMap.get(id);
-                      if (!l) return null;
-                      const isAdded = enabledSet.has(id);
-                      const disabled = isAdded && !allowDuplicateAdds;
-                      return (
-                        <button key={id} className={`fb-add-dropdown-item ${isAdded ? 'is-added' : ''}`}
-                          onClick={() => {
-                            if (disabled) return;
-                            onAdd(id);
-                            setOpen(false);
-                          }}
-                          disabled={disabled}
-                          title={disabled ? 'Already added' : isAdded ? 'Add again' : ''}>
-                          <span className="fb-dd-icon">{l.icon}</span>
-                          {t(`layer.${id}.label` as keyof Translations) || l.label}
-                          {isAdded && <span className="fb-add-check">{allowDuplicateAdds ? `+${varTfCounts?.get(id) ?? 1}` : '✓'}</span>}
-                        </button>
-                      );
-                    })}
+                    {group.ids.map(renderItem)}
+                    {hasSubGroups && group.subGroups!.map((sg, si) => (
+                      <NestedSubGroup key={si} group={sg} depth={1} />
+                    ))}
                   </div>
                 )}
               </div>
@@ -615,26 +754,7 @@ function AddLayerButton({
           })}
 
           {/* Flat entries */}
-          {FLAT_IDS.map((id) => {
-            const l = layerMap.get(id);
-            if (!l) return null;
-            const isAdded = enabledSet.has(id);
-            const disabled = isAdded && !allowDuplicateAdds;
-            return (
-              <button key={id} className={`fb-add-dropdown-item ${isAdded ? 'is-added' : ''}`}
-                onClick={() => {
-                  if (disabled) return;
-                  onAdd(id);
-                  setOpen(false);
-                }}
-                disabled={disabled}
-                title={disabled ? 'Already added' : isAdded ? 'Add again' : ''}>
-                <span className="fb-dd-icon">{l.icon}</span>
-                {t(`layer.${id}.label` as keyof Translations) || l.label}
-                {isAdded && <span className="fb-add-check">{allowDuplicateAdds ? `+${varTfCounts?.get(id) ?? 1}` : '✓'}</span>}
-              </button>
-            );
-          })}
+          {FLAT_IDS.map((id) => renderItem(id))}
         </div>
       )}
     </div>

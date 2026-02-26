@@ -95,7 +95,20 @@ export type VoteMetric =
   | 'rightPct'
   | 'independencePct'
   | 'unionistPct'
-  | 'turnoutPct';
+  | 'turnoutPct'
+  // Party metrics (read from VoteSentiment.partyPcts)
+  | 'ercPct'
+  | 'cupPct'
+  | 'podemPct'
+  | 'juntsPct'
+  | 'comunsPct'
+  | 'ppPct'
+  | 'voxPct'
+  | 'pscPct'
+  | 'csPct'
+  | 'pdecatPct'
+  | 'ciuPct'
+  | 'otherPartiesPct';
 
 /** A single vote scoring term the user can add to the formula. */
 export interface VoteTerm {
@@ -107,6 +120,25 @@ export interface VoteTerm {
   value: LayerTransferConfig;
 }
 
+/**
+ * Map party VoteMetric keys to their partyPcts record key.
+ * Metrics NOT in this map are read directly from VoteSentiment fields.
+ */
+export const PARTY_METRIC_KEY: Partial<Record<VoteMetric, string>> = {
+  ercPct: 'ERC',
+  cupPct: 'CUP',
+  podemPct: 'PODEM',
+  juntsPct: 'JUNTS',
+  comunsPct: 'COMUNS',
+  ppPct: 'PP',
+  voxPct: 'VOX',
+  pscPct: 'PSC',
+  csPct: 'Cs',
+  pdecatPct: 'PDeCAT',
+  ciuPct: 'CiU',
+  otherPartiesPct: 'OTHER',
+};
+
 /** Human-readable labels per VoteMetric (used in i18n). */
 export const VOTE_METRIC_OPTIONS: { metric: VoteMetric; labelKey: string }[] = [
   { metric: 'leftPct', labelKey: 'vote.metric.left' },
@@ -114,6 +146,19 @@ export const VOTE_METRIC_OPTIONS: { metric: VoteMetric; labelKey: string }[] = [
   { metric: 'independencePct', labelKey: 'vote.metric.indep' },
   { metric: 'unionistPct', labelKey: 'vote.metric.union' },
   { metric: 'turnoutPct', labelKey: 'vote.metric.turnout' },
+  // Party metrics
+  { metric: 'ercPct', labelKey: 'vote.metric.erc' },
+  { metric: 'cupPct', labelKey: 'vote.metric.cup' },
+  { metric: 'podemPct', labelKey: 'vote.metric.podem' },
+  { metric: 'juntsPct', labelKey: 'vote.metric.junts' },
+  { metric: 'comunsPct', labelKey: 'vote.metric.comuns' },
+  { metric: 'ppPct', labelKey: 'vote.metric.pp' },
+  { metric: 'voxPct', labelKey: 'vote.metric.vox' },
+  { metric: 'pscPct', labelKey: 'vote.metric.psc' },
+  { metric: 'csPct', labelKey: 'vote.metric.cs' },
+  { metric: 'pdecatPct', labelKey: 'vote.metric.pdecat' },
+  { metric: 'ciuPct', labelKey: 'vote.metric.ciu' },
+  { metric: 'otherPartiesPct', labelKey: 'vote.metric.otherParties' },
 ];
 
 /**
@@ -132,6 +177,12 @@ export interface LayerConfigs {
     /** Multi-term vote scoring. Each term evaluates a different metric. */
     terms: VoteTerm[];
   };
+  /** Per-party vote configs (mirrors votes.terms but for party-level layers). */
+  partyVotes: {
+    terms: VoteTerm[];
+  };
+  /** Per-axis sentiment configs (keyed by axis id, e.g. 'leftWing'). */
+  axisConfigs: Record<string, LayerTransferConfig>;
   transit: LayerTransferConfig;
   forest: LayerTransferConfig;
   airQuality: {
@@ -192,6 +243,23 @@ export const DEFAULT_LAYER_CONFIGS: LayerConfigs = {
       { id: 'v5', metric: 'turnoutPct', value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
     ],
   },
+  partyVotes: {
+    terms: [
+      { id: 'p1',  metric: 'ercPct',          value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
+      { id: 'p2',  metric: 'cupPct',          value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
+      { id: 'p3',  metric: 'podemPct',        value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
+      { id: 'p4',  metric: 'juntsPct',        value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
+      { id: 'p5',  metric: 'comunsPct',       value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
+      { id: 'p6',  metric: 'ppPct',           value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
+      { id: 'p7',  metric: 'voxPct',          value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
+      { id: 'p8',  metric: 'pscPct',          value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
+      { id: 'p9',  metric: 'csPct',           value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
+      { id: 'p10', metric: 'pdecatPct',       value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
+      { id: 'p11', metric: 'ciuPct',          value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
+      { id: 'p12', metric: 'otherPartiesPct', value: { enabled: true, tf: defaultTf(0, 100, 'sin', 0) } },
+    ],
+  },
+  axisConfigs: {},  // populated at runtime from POLITICAL_AXES via buildDefaultAxisConfigs()
   transit: { enabled: true, tf: defaultTf(5, 25, 'sin', 0.1) },
   forest: { enabled: true, tf: defaultTf(10, 80, 'sin', 0) },
   airQuality: {

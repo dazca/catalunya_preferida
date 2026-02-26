@@ -27,6 +27,7 @@ import {
   computeDistanceMap,
   idwInterpolate,
 } from '../utils/spatial';
+import { normalizeMunicipalityGeometries } from '../utils/municipalityGeometry';
 import type { PointLocation, StationValue } from '../utils/spatial';
 
 interface ResourceData {
@@ -244,8 +245,10 @@ export function useResourceData(): ResourceData {
 
         if (cancelled) return;
 
+        const normalizedMunicipalities = normalizeMunicipalityGeometries(municipalities);
+
         // -- Compute municipality centroids --
-        const centroids = municipalities ? buildCentroids(municipalities) : {};
+        const centroids = normalizedMunicipalities ? buildCentroids(normalizedMunicipalities) : {};
 
         // -- Extract point arrays from facility GeoJSON --
         const transitPts = extractPoints(transitStops);
@@ -306,7 +309,7 @@ export function useResourceData(): ResourceData {
         };
 
         setState({
-          municipalities,
+          municipalities: normalizedMunicipalities,
           municipalityData,
           centroids,
           facilityPoints: {

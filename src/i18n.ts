@@ -81,6 +81,47 @@ export interface Translations {
   'layer.votesUnionist.desc': string;
   'layer.votesTurnout.label': string;
   'layer.votesTurnout.desc': string;
+  // Party vote layers
+  'layer.votesParties.label': string;
+  'layer.votesERC.label': string;
+  'layer.votesERC.desc': string;
+  'layer.votesCUP.label': string;
+  'layer.votesCUP.desc': string;
+  'layer.votesPODEM.label': string;
+  'layer.votesPODEM.desc': string;
+  'layer.votesJUNTS.label': string;
+  'layer.votesJUNTS.desc': string;
+  'layer.votesCOMUNS.label': string;
+  'layer.votesCOMUNS.desc': string;
+  'layer.votesPP.label': string;
+  'layer.votesPP.desc': string;
+  'layer.votesVOX.label': string;
+  'layer.votesVOX.desc': string;
+  'layer.votesPSC.label': string;
+  'layer.votesPSC.desc': string;
+  'layer.votesOthers.label': string;
+  'layer.votesCs.label': string;
+  'layer.votesCs.desc': string;
+  'layer.votesPDeCAT.label': string;
+  'layer.votesPDeCAT.desc': string;
+  'layer.votesCiU.label': string;
+  'layer.votesCiU.desc': string;
+  'layer.votesOtherParties.label': string;
+  'layer.votesOtherParties.desc': string;
+  // Political axis layers
+  'layer.votesAxes.label': string;
+  'layer.axis_leftWing.label': string;
+  'layer.axis_leftWing.desc': string;
+  'layer.axis_proIndependence.label': string;
+  'layer.axis_proIndependence.desc': string;
+  'layer.axis_feminist.label': string;
+  'layer.axis_feminist.desc': string;
+  'layer.axis_ecologist.label': string;
+  'layer.axis_ecologist.desc': string;
+  'layer.axis_populist.label': string;
+  'layer.axis_populist.desc': string;
+  'layer.axis_liberalEconomic.label': string;
+  'layer.axis_liberalEconomic.desc': string;
   'layer.transit.label': string;
   'layer.transit.desc': string;
   'layer.forest.label': string;
@@ -135,6 +176,18 @@ export interface Translations {
   'vote.metric.indep': string;
   'vote.metric.union': string;
   'vote.metric.turnout': string;
+  'vote.metric.erc': string;
+  'vote.metric.cup': string;
+  'vote.metric.podem': string;
+  'vote.metric.junts': string;
+  'vote.metric.comuns': string;
+  'vote.metric.pp': string;
+  'vote.metric.vox': string;
+  'vote.metric.psc': string;
+  'vote.metric.cs': string;
+  'vote.metric.pdecat': string;
+  'vote.metric.ciu': string;
+  'vote.metric.otherParties': string;
 
   // ── Formula Bar ─────────────────────────────────────────────────────
   'fb.show': string;
@@ -234,6 +287,47 @@ const CA: Translations = {
   'layer.votesUnionist.desc': 'Vot unionista',
   'layer.votesTurnout.label': 'Participacio %',
   'layer.votesTurnout.desc': 'Participacio electoral',
+  // Party vote layers
+  'layer.votesParties.label': 'Partits',
+  'layer.votesERC.label': 'ERC %',
+  'layer.votesERC.desc': 'Esquerra Republicana de Catalunya',
+  'layer.votesCUP.label': 'CUP %',
+  'layer.votesCUP.desc': 'Candidatura d\'Unitat Popular',
+  'layer.votesPODEM.label': 'Podem %',
+  'layer.votesPODEM.desc': 'Podem / Podemos',
+  'layer.votesJUNTS.label': 'Junts %',
+  'layer.votesJUNTS.desc': 'Junts per Catalunya',
+  'layer.votesCOMUNS.label': 'Comuns %',
+  'layer.votesCOMUNS.desc': 'En Comu Podem',
+  'layer.votesPP.label': 'PP %',
+  'layer.votesPP.desc': 'Partido Popular',
+  'layer.votesVOX.label': 'Vox %',
+  'layer.votesVOX.desc': 'Vox',
+  'layer.votesPSC.label': 'PSC %',
+  'layer.votesPSC.desc': 'Partit dels Socialistes de Catalunya',
+  'layer.votesOthers.label': 'Altres',
+  'layer.votesCs.label': 'Cs %',
+  'layer.votesCs.desc': 'Ciutadans',
+  'layer.votesPDeCAT.label': 'PDeCAT %',
+  'layer.votesPDeCAT.desc': 'Partit Democrata',
+  'layer.votesCiU.label': 'CiU %',
+  'layer.votesCiU.desc': 'Convergencia i Unio',
+  'layer.votesOtherParties.label': 'Altres partits %',
+  'layer.votesOtherParties.desc': 'Resta de partits',
+  // Political axis layers
+  'layer.votesAxes.label': 'Eixos',
+  'layer.axis_leftWing.label': 'Esquerres',
+  'layer.axis_leftWing.desc': 'Sentiment d\'esquerres ponderat per partits',
+  'layer.axis_proIndependence.label': 'Independentisme',
+  'layer.axis_proIndependence.desc': 'Sentiment independentista ponderat per partits',
+  'layer.axis_feminist.label': 'Feminisme',
+  'layer.axis_feminist.desc': 'Sentiment feminista ponderat per partits',
+  'layer.axis_ecologist.label': 'Ecologisme',
+  'layer.axis_ecologist.desc': 'Sentiment ecologista ponderat per partits',
+  'layer.axis_populist.label': 'Populisme',
+  'layer.axis_populist.desc': 'Sentiment populista ponderat per partits',
+  'layer.axis_liberalEconomic.label': 'Liberalisme econ\u00f2mic',
+  'layer.axis_liberalEconomic.desc': 'Sentiment liberal-econ\u00f2mic ponderat per partits',
   'layer.transit.label': 'Transport public',
   'layer.transit.desc': 'Proximitat a tren, metro, bus',
   'layer.forest.label': 'Cobertura forestal',
@@ -285,6 +379,18 @@ const CA: Translations = {
   'vote.metric.indep': 'Independentisme %',
   'vote.metric.union': 'Unionisme %',
   'vote.metric.turnout': 'Participacio %',
+  'vote.metric.erc': 'ERC %',
+  'vote.metric.cup': 'CUP %',
+  'vote.metric.podem': 'Podem %',
+  'vote.metric.junts': 'Junts %',
+  'vote.metric.comuns': 'Comuns %',
+  'vote.metric.pp': 'PP %',
+  'vote.metric.vox': 'Vox %',
+  'vote.metric.psc': 'PSC %',
+  'vote.metric.cs': 'Cs %',
+  'vote.metric.pdecat': 'PDeCAT %',
+  'vote.metric.ciu': 'CiU %',
+  'vote.metric.otherParties': 'Altres partits %',
 
   'fb.show': 'Formula',
   'fb.hide': 'Amaga',
@@ -380,6 +486,47 @@ const EN: Translations = {
   'layer.votesUnionist.desc': 'Unionist vote share',
   'layer.votesTurnout.label': 'Turnout %',
   'layer.votesTurnout.desc': 'Voter turnout',
+  // Party vote layers
+  'layer.votesParties.label': 'Parties',
+  'layer.votesERC.label': 'ERC %',
+  'layer.votesERC.desc': 'Esquerra Republicana de Catalunya',
+  'layer.votesCUP.label': 'CUP %',
+  'layer.votesCUP.desc': 'Popular Unity Candidacy',
+  'layer.votesPODEM.label': 'Podem %',
+  'layer.votesPODEM.desc': 'Podem / Podemos',
+  'layer.votesJUNTS.label': 'Junts %',
+  'layer.votesJUNTS.desc': 'Together for Catalonia',
+  'layer.votesCOMUNS.label': 'Comuns %',
+  'layer.votesCOMUNS.desc': 'En Comu Podem / Barcelona en Comu',
+  'layer.votesPP.label': 'PP %',
+  'layer.votesPP.desc': 'People\'s Party',
+  'layer.votesVOX.label': 'Vox %',
+  'layer.votesVOX.desc': 'Vox',
+  'layer.votesPSC.label': 'PSC %',
+  'layer.votesPSC.desc': 'Socialists\' Party of Catalonia',
+  'layer.votesOthers.label': 'Others',
+  'layer.votesCs.label': 'Cs %',
+  'layer.votesCs.desc': 'Citizens',
+  'layer.votesPDeCAT.label': 'PDeCAT %',
+  'layer.votesPDeCAT.desc': 'Democratic Party',
+  'layer.votesCiU.label': 'CiU %',
+  'layer.votesCiU.desc': 'Convergence and Union',
+  'layer.votesOtherParties.label': 'Other parties %',
+  'layer.votesOtherParties.desc': 'All remaining parties',
+  // Political axis layers
+  'layer.votesAxes.label': 'Axes',
+  'layer.axis_leftWing.label': 'Left Wing',
+  'layer.axis_leftWing.desc': 'Left-wing sentiment weighted by party vote share',
+  'layer.axis_proIndependence.label': 'Pro-Independence',
+  'layer.axis_proIndependence.desc': 'Pro-independence sentiment weighted by party vote share',
+  'layer.axis_feminist.label': 'Feminist',
+  'layer.axis_feminist.desc': 'Feminist sentiment weighted by party vote share',
+  'layer.axis_ecologist.label': 'Ecologist',
+  'layer.axis_ecologist.desc': 'Ecologist sentiment weighted by party vote share',
+  'layer.axis_populist.label': 'Populist',
+  'layer.axis_populist.desc': 'Populist sentiment weighted by party vote share',
+  'layer.axis_liberalEconomic.label': 'Liberal-Economic',
+  'layer.axis_liberalEconomic.desc': 'Liberal-economic sentiment weighted by party vote share',
   'layer.transit.label': 'Public Transit',
   'layer.transit.desc': 'Rail, metro, bus proximity',
   'layer.forest.label': 'Forest Cover',
@@ -431,6 +578,18 @@ const EN: Translations = {
   'vote.metric.indep': 'Independence %',
   'vote.metric.union': 'Unionist %',
   'vote.metric.turnout': 'Turnout %',
+  'vote.metric.erc': 'ERC %',
+  'vote.metric.cup': 'CUP %',
+  'vote.metric.podem': 'Podem %',
+  'vote.metric.junts': 'Junts %',
+  'vote.metric.comuns': 'Comuns %',
+  'vote.metric.pp': 'PP %',
+  'vote.metric.vox': 'Vox %',
+  'vote.metric.psc': 'PSC %',
+  'vote.metric.cs': 'Cs %',
+  'vote.metric.pdecat': 'PDeCAT %',
+  'vote.metric.ciu': 'CiU %',
+  'vote.metric.otherParties': 'Other parties %',
 
   'fb.show': 'Formula',
   'fb.hide': 'Hide',

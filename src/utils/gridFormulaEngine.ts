@@ -278,6 +278,19 @@ function getLayerTf(id: LayerId | string, configs: LayerConfigs): TransferFuncti
     case 'votesIndep':       return configs.votes.terms.find(t => t.metric === 'independencePct')?.value.tf ?? null;
     case 'votesUnionist':    return configs.votes.terms.find(t => t.metric === 'unionistPct')?.value.tf ?? null;
     case 'votesTurnout':     return configs.votes.terms.find(t => t.metric === 'turnoutPct')?.value.tf ?? null;
+    // Party vote layers
+    case 'votesERC':          return configs.partyVotes.terms.find(t => t.metric === 'ercPct')?.value.tf ?? null;
+    case 'votesCUP':          return configs.partyVotes.terms.find(t => t.metric === 'cupPct')?.value.tf ?? null;
+    case 'votesPODEM':        return configs.partyVotes.terms.find(t => t.metric === 'podemPct')?.value.tf ?? null;
+    case 'votesJUNTS':        return configs.partyVotes.terms.find(t => t.metric === 'juntsPct')?.value.tf ?? null;
+    case 'votesCOMUNS':       return configs.partyVotes.terms.find(t => t.metric === 'comunsPct')?.value.tf ?? null;
+    case 'votesPP':           return configs.partyVotes.terms.find(t => t.metric === 'ppPct')?.value.tf ?? null;
+    case 'votesVOX':          return configs.partyVotes.terms.find(t => t.metric === 'voxPct')?.value.tf ?? null;
+    case 'votesPSC':          return configs.partyVotes.terms.find(t => t.metric === 'pscPct')?.value.tf ?? null;
+    case 'votesCs':           return configs.partyVotes.terms.find(t => t.metric === 'csPct')?.value.tf ?? null;
+    case 'votesPDeCAT':       return configs.partyVotes.terms.find(t => t.metric === 'pdecatPct')?.value.tf ?? null;
+    case 'votesCiU':          return configs.partyVotes.terms.find(t => t.metric === 'ciuPct')?.value.tf ?? null;
+    case 'votesOtherParties': return configs.partyVotes.terms.find(t => t.metric === 'otherPartiesPct')?.value.tf ?? null;
     case 'transit':          return configs.transit.tf;
     case 'forest':           return configs.forest.tf;
     case 'airQualityPm10':   return configs.airQuality.pm10.tf;
@@ -291,7 +304,14 @@ function getLayerTf(id: LayerId | string, configs: LayerConfigs): TransferFuncti
     case 'rentalPrices':     return configs.rentalPrices.tf;
     case 'employment':       return configs.employment.tf;
     case 'amenities':        return configs.amenities.tf;
-    default:                 return null;
+    default: {
+      // Political axis layers
+      if (typeof id === 'string' && id.startsWith('axis_')) {
+        const axisId = id.slice(5);
+        return configs.axisConfigs?.[axisId]?.tf ?? null;
+      }
+      return null;
+    }
   }
 }
 

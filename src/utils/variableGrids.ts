@@ -17,6 +17,7 @@
 import type { MunicipalityCollection } from '../types';
 import type { MunicipalityData } from './scorer';
 import { normalizeIne } from './scorer';
+import { POLITICAL_AXES, axisLayerId, computeAxisScore } from './politicalAxes';
 
 /* ── Variable identifiers ──────────────────────────────────────────── */
 
@@ -31,6 +32,19 @@ export const MUNICIPALITY_VARS = [
   'votesIndep',
   'votesUnionist',
   'votesTurnout',
+  // Party vote variables
+  'votesERC',
+  'votesCUP',
+  'votesPODEM',
+  'votesJUNTS',
+  'votesCOMUNS',
+  'votesPP',
+  'votesVOX',
+  'votesPSC',
+  'votesCs',
+  'votesPDeCAT',
+  'votesCiU',
+  'votesOtherParties',
   'transit',
   'forest',
   'airQualityPm10',
@@ -44,14 +58,21 @@ export const MUNICIPALITY_VARS = [
   'rentalPrices',
   'employment',
   'amenities',
+  // Political axis variables are appended dynamically below
 ] as const;
+
+/** Static var names + dynamically derived axis var names. */
+export const ALL_MUNICIPALITY_VARS: readonly string[] = [
+  ...MUNICIPALITY_VARS,
+  ...POLITICAL_AXES.map(a => axisLayerId(a.id)),
+];
 
 export type MunicipalityVarName = (typeof MUNICIPALITY_VARS)[number];
 
-/* ── LUT builder ───────────────────────────────────────────────────── */
+/* ── LUT builder ─────────────────────────────────────────────────────────── */
 
 /** Per-variable lookup table: Float32Array indexed by feature-index. */
-export type MunicipalityLUT = Record<MunicipalityVarName, Float32Array>;
+export type MunicipalityLUT = Record<string, Float32Array>;
 
 /**
  * Build a LUT mapping feature-index → raw variable value for every
@@ -69,7 +90,7 @@ export function buildMunicipalityLUT(
 
   // Allocate all arrays once (filled with NaN = missing)
   const lut = {} as MunicipalityLUT;
-  for (const varName of MUNICIPALITY_VARS) {
+  for (const varName of ALL_MUNICIPALITY_VARS) {
     lut[varName] = new Float32Array(n).fill(NaN);
   }
 
@@ -86,6 +107,30 @@ export function buildMunicipalityLUT(
       lut.votesIndep[i]    = v.independencePct ?? NaN;
       lut.votesUnionist[i] = v.unionistPct ?? NaN;
       lut.votesTurnout[i]  = v.turnoutPct ?? NaN;
+
+      // Party vote percentages
+      const pp = v.partyPcts;
+      if (pp) {
+        lut.votesERC[i]          = pp.ERC ?? NaN;
+        lut.votesCUP[i]          = pp.CUP ?? NaN;
+        lut.votesPODEM[i]        = pp.PODEM ?? NaN;
+        lut.votesJUNTS[i]        = pp.JUNTS ?? NaN;
+        lut.votesCOMUNS[i]       = pp.COMUNS ?? NaN;
+        lut.votesPP[i]           = pp.PP ?? NaN;
+        lut.votesVOX[i]          = pp.VOX ?? NaN;
+        lut.votesPSC[i]          = pp.PSC ?? NaN;
+        lut.votesCs[i]           = pp.Cs ?? NaN;
+        lut.votesPDeCAT[i]       = pp.PDeCAT ?? NaN;
+        lut.votesCiU[i]          = pp.CiU ?? NaN;
+        lut.votesOtherParties[i] = pp.OTHER ?? NaN;
+      }
+
+      // Political axis grids (computed from partyPcts × axis weights)
+      if (v.partyPcts) {
+        for (const axis of POLITICAL_AXES) {
+          lut[axisLayerId(axis.id)][i] = computeAxisScore(axis, v.partyPcts);
+        }
+      }
     }
 
     // Distance-based
@@ -175,9 +220,9 @@ export function buildAllVariableGrids(
   municipalityLUT: MunicipalityLUT,
   cols: number,
   rows: number,
-): Record<MunicipalityVarName, Float32Array> {
-  const grids = {} as Record<MunicipalityVarName, Float32Array>;
-  for (const varName of MUNICIPALITY_VARS) {
+): Record<string, Float32Array> {
+  const grids = {} as Record<string, Float32Array>;
+  for (const varName of ALL_MUNICIPALITY_VARS) {
     grids[varName] = buildVariableGrid(membershipRaster, municipalityLUT[varName], cols, rows);
   }
   return grids;

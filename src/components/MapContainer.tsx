@@ -294,6 +294,7 @@ export default function MapContainer({
           paint: {
             'fill-color': 'rgba(200,200,200,0.3)',
             'fill-opacity': v.showChoropleth ? 0.6 : 0,
+            'fill-antialias': false,
           },
           layout: { visibility: v.showChoropleth ? 'visible' : 'none' },
         },

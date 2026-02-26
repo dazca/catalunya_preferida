@@ -36,6 +36,7 @@ import type {
   TfShape,
   VoteMetric,
 } from '../types/transferFunction';
+import { POLITICAL_AXES, axisLayerId, axisIdFromLayerId } from './politicalAxes';
 
 /* ── Variable name mapping ──────────────────────────────────────────── */
 
@@ -49,6 +50,19 @@ export const LAYER_VAR: Record<string, string> = {
   votesIndep:      'votesIndep',
   votesUnionist:   'votesUnionist',
   votesTurnout:    'votesTurnout',
+  // Party layers
+  votesERC:          'votesERC',
+  votesCUP:          'votesCUP',
+  votesPODEM:        'votesPODEM',
+  votesJUNTS:        'votesJUNTS',
+  votesCOMUNS:       'votesCOMUNS',
+  votesPP:           'votesPP',
+  votesVOX:          'votesVOX',
+  votesPSC:          'votesPSC',
+  votesCs:           'votesCs',
+  votesPDeCAT:       'votesPDeCAT',
+  votesCiU:          'votesCiU',
+  votesOtherParties: 'votesOtherParties',
   transit:         'transit',
   forest:          'forest',
   soil:            'soil',
@@ -64,6 +78,10 @@ export const LAYER_VAR: Record<string, string> = {
   rentalPrices:    'rentalPrices',
   employment:      'employment',
   amenities:       'amenities',
+  // Political axis variables (derived from POLITICAL_AXES)
+  ...Object.fromEntries(
+    POLITICAL_AXES.map(a => [axisLayerId(a.id), axisLayerId(a.id)]),
+  ),
 };
 
 /* ── Vote metric map ────────────────────────────────────────────────── */
@@ -74,6 +92,19 @@ const VOTE_ID_TO_METRIC: Record<string, VoteMetric> = {
   votesIndep:    'independencePct',
   votesUnionist: 'unionistPct',
   votesTurnout:  'turnoutPct',
+  // Party layers
+  votesERC:          'ercPct',
+  votesCUP:          'cupPct',
+  votesPODEM:        'podemPct',
+  votesJUNTS:        'juntsPct',
+  votesCOMUNS:       'comunsPct',
+  votesPP:           'ppPct',
+  votesVOX:          'voxPct',
+  votesPSC:          'pscPct',
+  votesCs:           'csPct',
+  votesPDeCAT:       'pdecatPct',
+  votesCiU:          'ciuPct',
+  votesOtherParties: 'otherPartiesPct',
 };
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
@@ -100,6 +131,22 @@ export function layerTf(id: LayerId, configs: LayerConfigs): TransferFunction | 
       const metric = VOTE_ID_TO_METRIC[id];
       return configs.votes.terms.find((t) => t.metric === metric)?.value.tf ?? null;
     }
+    // Party vote layers
+    case 'votesERC':
+    case 'votesCUP':
+    case 'votesPODEM':
+    case 'votesJUNTS':
+    case 'votesCOMUNS':
+    case 'votesPP':
+    case 'votesVOX':
+    case 'votesPSC':
+    case 'votesCs':
+    case 'votesPDeCAT':
+    case 'votesCiU':
+    case 'votesOtherParties': {
+      const metric = VOTE_ID_TO_METRIC[id];
+      return configs.partyVotes.terms.find((t) => t.metric === metric)?.value.tf ?? null;
+    }
     case 'transit':         return configs.transit.tf;
     case 'forest':          return configs.forest.tf;
     case 'airQualityPm10':  return configs.airQuality.pm10.tf;
@@ -113,7 +160,12 @@ export function layerTf(id: LayerId, configs: LayerConfigs): TransferFunction | 
     case 'rentalPrices':    return configs.rentalPrices.tf;
     case 'employment':      return configs.employment.tf;
     case 'amenities':       return configs.amenities.tf;
-    default:                return null;
+    default: {
+      // Political axis layers
+      const axisId = axisIdFromLayerId(id);
+      if (axisId) return configs.axisConfigs?.[axisId]?.tf ?? null;
+      return null;
+    }
   }
 }
 

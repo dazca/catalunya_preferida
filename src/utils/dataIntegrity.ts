@@ -28,6 +28,8 @@ export interface IntegrityIssue {
   message: string;
   affectedCount: number;
   sampleCodes: string[];
+  /** Full list of affected municipality codes (for map integration). */
+  affectedCodis?: string[];
 }
 
 export interface IntegrityLayerReport {
@@ -35,11 +37,24 @@ export interface IntegrityLayerReport {
   issues: IntegrityIssue[];
 }
 
+export interface IntegrityLayerStats {
+  layer: IntegrityLayer;
+  totalRecords: number;
+  municipalityCoverage: number;
+  blankFieldPct: number;
+  outlierCount: number;
+  dataYear: number | null;
+}
+
 export interface IntegrityReport {
   generatedAt: string;
   totalIssues: number;
   bySeverity: Record<IntegritySeverity, number>;
   layers: IntegrityLayerReport[];
+  /** Per-layer quick stats for the matrix/freshness views. */
+  layerStats: IntegrityLayerStats[];
+  /** Municipality codes present in each layer (for map). */
+  coverageByLayer: Record<string, string[]>;
 }
 
 export interface IntegrityRules {
@@ -50,6 +65,14 @@ export interface IntegrityRules {
   staleYearThreshold: number;
   leftParties: string[];
   independenceParties: string[];
+  /** Enable cross-layer correlation check. */
+  crossLayerCheck: boolean;
+  /** Enable coordinate bounds validation (Catalonia bbox). */
+  coordBoundsCheck: boolean;
+  /** Enable broken codi reference check. */
+  brokenRefCheck: boolean;
+  /** Enable duplicate codi detection per layer. */
+  duplicateCodiCheck: boolean;
 }
 
 export const DEFAULT_INTEGRITY_RULES: IntegrityRules = {
@@ -58,6 +81,10 @@ export const DEFAULT_INTEGRITY_RULES: IntegrityRules = {
   maxOutlierZScore: 4,
   maxDuplicateCoordDecimals: 5,
   staleYearThreshold: 6,
+  crossLayerCheck: true,
+  coordBoundsCheck: true,
+  brokenRefCheck: true,
+  duplicateCodiCheck: true,
   leftParties: [
     'psc', 'erc', 'cup', 'podem', 'icv', 'euia', 'comuns', 'bcomú', 'en comú',
     'iniciativa', 'esquerra', 'socialistes', 'podemos', 'sumar',
@@ -77,6 +104,8 @@ export interface DataIntegrityInput {
   healthFacilities: FacilityCollection | null;
   schools: FacilityCollection | null;
   amenities: FacilityCollection | null;
+  /** Optional raw arrays (before indexing) for duplicate codi detection. */
+  rawArrays?: Partial<Record<IntegrityLayer, Array<{ codi: string }> | null>>;
 }
 
 function mean(values: number[]): number {
@@ -117,6 +146,7 @@ function addIssue(
     message,
     affectedCount: affectedCodes.length,
     sampleCodes: affectedCodes.slice(0, 8),
+    affectedCodis: affectedCodes,
   });
 }
 
@@ -378,64 +408,211 @@ function checkPointCollection(
   }
 }
 
+/** Catalonia bounding box [minLon, minLat, maxLon, maxLat]. */
+const CAT_BBOX = { minLon: 0.15, minLat: 40.52, maxLon: 3.33, maxLat: 42.86 };
+
+/**
+ * Check that point features fall within the Catalonia bounding box.
+ */
+function checkCoordinateBounds(
+  layer: IntegrityLayer,
+  fc: TransitStopCollection | FacilityCollection | null,
+  out: IntegrityIssue[],
+): void {
+  if (!fc) return;
+  const oob: string[] = [];
+  fc.features.forEach((f, idx) => {
+    if (f.geometry?.type !== 'Point') return;
+    const [lon, lat] = f.geometry.coordinates;
+    if (lat < CAT_BBOX.minLat || lat > CAT_BBOX.maxLat || lon < CAT_BBOX.minLon || lon > CAT_BBOX.maxLon) {
+      oob.push(`idx:${idx}`);
+    }
+  });
+  if (oob.length > 0) {
+    addIssue(out, layer, 'warning', 'geo.outsideCatalonia', `${oob.length} points outside Catalonia bounding box`, oob);
+  }
+}
+
+/**
+ * Cross-layer correlation: flag municipalities that exist in layer A but not in layer B.
+ */
+function checkCrossLayerCorrelation(
+  municipalityCodes: Set<string>,
+  data: MunicipalityData,
+  out: IntegrityIssue[],
+): void {
+  const layerPairs: Array<[IntegrityLayer, IntegrityLayer, string, string]> = [
+    ['votes', 'employment', 'votes', 'employment'],
+    ['votes', 'rentalPrices', 'votes', 'rentalPrices'],
+    ['employment', 'rentalPrices', 'employment', 'rentalPrices'],
+    ['terrain', 'forest', 'terrain', 'forest'],
+  ];
+
+  for (const [layerA, layerB, keyA, keyB] of layerPairs) {
+    const codesA = new Set(Object.keys((data as Record<string, Record<string, unknown>>)[keyA] ?? {}));
+    const codesB = new Set(Object.keys((data as Record<string, Record<string, unknown>>)[keyB] ?? {}));
+    const inANotB: string[] = [];
+    const inBNotA: string[] = [];
+    for (const c of codesA) if (!codesB.has(c) && municipalityCodes.has(c)) inANotB.push(c);
+    for (const c of codesB) if (!codesA.has(c) && municipalityCodes.has(c)) inBNotA.push(c);
+    if (inANotB.length > 20) {
+      addIssue(out, 'global', 'warning', `crosslayer.${layerA}_${layerB}`,
+        `${inANotB.length} municipalities in ${layerA} but not in ${layerB}`, inANotB);
+    }
+    if (inBNotA.length > 20) {
+      addIssue(out, 'global', 'warning', `crosslayer.${layerB}_${layerA}`,
+        `${inBNotA.length} municipalities in ${layerB} but not in ${layerA}`, inBNotA);
+    }
+  }
+}
+
+/**
+ * Broken reference: validate that codi values in data layers actually exist in the municipalities GeoJSON.
+ */
+function checkBrokenReferences(
+  municipalityCodes: Set<string>,
+  data: MunicipalityData,
+  out: IntegrityIssue[],
+): void {
+  const layerKeys: Array<[IntegrityLayer, string]> = [
+    ['votes', 'votes'], ['terrain', 'terrain'], ['forest', 'forest'],
+    ['crime', 'crime'], ['rentalPrices', 'rentalPrices'], ['employment', 'employment'],
+    ['internet', 'internet'], ['airQuality', 'airQuality'],
+  ];
+
+  for (const [layer, key] of layerKeys) {
+    const table = (data as Record<string, Record<string, unknown>>)[key] ?? {};
+    const orphans: string[] = [];
+    for (const codi of Object.keys(table)) {
+      if (!municipalityCodes.has(codi)) orphans.push(codi);
+    }
+    if (orphans.length > 0) {
+      addIssue(out, layer, 'warning', 'ref.broken',
+        `${orphans.length} codi values not found in municipalities GeoJSON`, orphans);
+    }
+  }
+}
+
+/**
+ * Duplicate codi detection within a single dataset.
+ */
+function checkDuplicateCodis(
+  layer: IntegrityLayer,
+  rawArray: Array<{ codi: string }> | null,
+  out: IntegrityIssue[],
+): void {
+  if (!rawArray || rawArray.length === 0) return;
+  const seen = new Map<string, number>();
+  const dupes: string[] = [];
+  for (const item of rawArray) {
+    const c = normalizeIne(item.codi);
+    const prev = seen.get(c) ?? 0;
+    if (prev === 1) dupes.push(c);
+    seen.set(c, prev + 1);
+  }
+  if (dupes.length > 0) {
+    addIssue(out, layer, 'warning', 'codi.duplicate',
+      `${dupes.length} duplicate codi values in raw dataset`, dupes);
+  }
+}
+
 export function runDataIntegrityChecks(
   input: DataIntegrityInput,
   rules: IntegrityRules,
 ): IntegrityReport {
   const issues: IntegrityIssue[] = [];
+  const municipalityData = {
+    terrain: input.municipalityData?.terrain ?? {},
+    votes: input.municipalityData?.votes ?? {},
+    forest: input.municipalityData?.forest ?? {},
+    crime: input.municipalityData?.crime ?? {},
+    rentalPrices: input.municipalityData?.rentalPrices ?? {},
+    employment: input.municipalityData?.employment ?? {},
+    climate: input.municipalityData?.climate ?? {},
+    airQuality: input.municipalityData?.airQuality ?? {},
+    internet: input.municipalityData?.internet ?? {},
+    transitDistKm: input.municipalityData?.transitDistKm ?? {},
+    healthcareDistKm: input.municipalityData?.healthcareDistKm ?? {},
+    schoolDistKm: input.municipalityData?.schoolDistKm ?? {},
+    amenityDistKm: input.municipalityData?.amenityDistKm ?? {},
+  };
   const municipalityCodes = uniqueMunicipalityCodes(input.municipalities);
 
   if (municipalityCodes.size === 0) {
     addIssue(issues, 'global', 'error', 'municipalities.missing', 'Municipality geometry dataset is missing', []);
   }
 
-  checkVotes(municipalityCodes, input.municipalityData, rules, issues);
+  checkVotes(municipalityCodes, municipalityData, rules, issues);
 
-  checkObjectLayer('terrain', municipalityCodes, input.municipalityData.terrain, [
+  checkObjectLayer('terrain', municipalityCodes, municipalityData.terrain, [
     { name: 'avgSlopeDeg', read: (r) => r.avgSlopeDeg, min: 0, max: 90 },
     { name: 'avgElevationM', read: (r) => r.avgElevationM, min: -100, max: 4000 },
   ], rules, issues);
 
-  checkObjectLayer('forest', municipalityCodes, input.municipalityData.forest, [
+  checkObjectLayer('forest', municipalityCodes, municipalityData.forest, [
     { name: 'forestPct', read: (r) => r.forestPct, min: 0, max: 100 },
   ], rules, issues);
 
-  checkObjectLayer('airQuality', municipalityCodes, input.municipalityData.airQuality, [
+  checkObjectLayer('airQuality', municipalityCodes, municipalityData.airQuality, [
     { name: 'pm10', read: (r) => r.pm10, min: 0, max: 200 },
     { name: 'no2', read: (r) => r.no2, min: 0, max: 200 },
   ], rules, issues);
 
-  checkObjectLayer('crime', municipalityCodes, input.municipalityData.crime, [
+  checkObjectLayer('crime', municipalityCodes, municipalityData.crime, [
     { name: 'ratePerThousand', read: (r) => r.ratePerThousand, min: 0, max: 300 },
   ], rules, issues);
 
-  checkObjectLayer('rentalPrices', municipalityCodes, input.municipalityData.rentalPrices, [
+  checkObjectLayer('rentalPrices', municipalityCodes, municipalityData.rentalPrices, [
     { name: 'avgEurMonth', read: (r) => r.avgEurMonth, min: 0, max: 10000 },
   ], rules, issues);
 
-  checkObjectLayer('employment', municipalityCodes, input.municipalityData.employment, [
+  checkObjectLayer('employment', municipalityCodes, municipalityData.employment, [
     { name: 'unemploymentPct', read: (r) => r.unemploymentPct, min: 0, max: 100 },
   ], rules, issues);
 
-  checkObjectLayer('internet', municipalityCodes, input.municipalityData.internet, [
+  checkObjectLayer('internet', municipalityCodes, municipalityData.internet, [
     { name: 'fiberPct', read: (r) => r.fiberPct, min: 0, max: 100 },
   ], rules, issues);
 
-  checkObjectLayer('climate', municipalityCodes, input.municipalityData.climate, [
+  checkObjectLayer('climate', municipalityCodes, municipalityData.climate, [
     { name: 'avgTempC', read: (r) => r.avgTempC, min: -40, max: 55 },
     { name: 'avgRainfallMm', read: (r) => r.avgRainfallMm, min: 0, max: 4000 },
   ], rules, issues);
 
-  checkDistanceLayer('transit', municipalityCodes, input.municipalityData.transitDistKm, rules, issues);
-  checkDistanceLayer('healthcare', municipalityCodes, input.municipalityData.healthcareDistKm, rules, issues);
-  checkDistanceLayer('schools', municipalityCodes, input.municipalityData.schoolDistKm, rules, issues);
-  checkDistanceLayer('amenities', municipalityCodes, input.municipalityData.amenityDistKm, rules, issues);
+  checkDistanceLayer('transit', municipalityCodes, municipalityData.transitDistKm, rules, issues);
+  checkDistanceLayer('healthcare', municipalityCodes, municipalityData.healthcareDistKm, rules, issues);
+  checkDistanceLayer('schools', municipalityCodes, municipalityData.schoolDistKm, rules, issues);
+  checkDistanceLayer('amenities', municipalityCodes, municipalityData.amenityDistKm, rules, issues);
 
   checkPointCollection('transit', input.transitStops, rules, issues);
   checkPointCollection('healthcare', input.healthFacilities, rules, issues);
   checkPointCollection('schools', input.schools, rules, issues);
   checkPointCollection('amenities', input.amenities, rules, issues);
 
+  // ── New checks ─────────────────────────────────────────────────
+  if (rules.coordBoundsCheck) {
+    checkCoordinateBounds('transit', input.transitStops, issues);
+    checkCoordinateBounds('healthcare', input.healthFacilities, issues);
+    checkCoordinateBounds('schools', input.schools, issues);
+    checkCoordinateBounds('amenities', input.amenities, issues);
+  }
+
+  if (rules.crossLayerCheck) {
+    checkCrossLayerCorrelation(municipalityCodes, municipalityData, issues);
+  }
+
+  if (rules.brokenRefCheck) {
+    checkBrokenReferences(municipalityCodes, municipalityData, issues);
+  }
+
+  // Duplicate codi checks (requires raw arrays — stored on input if provided)
+  if (rules.duplicateCodiCheck && input.rawArrays) {
+    for (const [layer, arr] of Object.entries(input.rawArrays) as Array<[IntegrityLayer, Array<{ codi: string }> | null]>) {
+      checkDuplicateCodis(layer, arr, issues);
+    }
+  }
+
+  // ── Build report ───────────────────────────────────────────────
   const grouped = new Map<IntegrityLayer, IntegrityIssue[]>();
   for (const issue of issues) {
     const prev = grouped.get(issue.layer);
@@ -451,10 +628,73 @@ export function runDataIntegrityChecks(
   const bySeverity: Record<IntegritySeverity, number> = { info: 0, warning: 0, error: 0 };
   for (const issue of issues) bySeverity[issue.severity] += 1;
 
+  // ── Per-layer stats + coverage map ─────────────────────────────
+  const muniDataKeys: Array<[IntegrityLayer, string]> = [
+    ['votes', 'votes'], ['terrain', 'terrain'], ['forest', 'forest'],
+    ['crime', 'crime'], ['rentalPrices', 'rentalPrices'], ['employment', 'employment'],
+    ['internet', 'internet'], ['airQuality', 'airQuality'], ['climate', 'climate'],
+  ];
+
+  const coverageByLayer: Record<string, string[]> = {};
+  const layerStats: IntegrityLayerStats[] = [];
+  const totalMunis = municipalityCodes.size || 1;
+
+  for (const [layer, key] of muniDataKeys) {
+    const table = (municipalityData as Record<string, Record<string, unknown>>)[key] ?? {};
+    const codes = Object.keys(table);
+    coverageByLayer[layer] = codes;
+    const coverage = (codes.length / totalMunis) * 100;
+
+    // Extract year from first record if available
+    let dataYear: number | null = null;
+    const first = Object.values(table)[0] as Record<string, unknown> | undefined;
+    if (first && typeof first.year === 'number') dataYear = first.year;
+
+    // Count outliers for this layer from issues
+    const layerIssues = grouped.get(layer) ?? [];
+    const outlierCount = layerIssues
+      .filter((i) => i.code.includes('outlier'))
+      .reduce((acc, i) => acc + i.affectedCount, 0);
+    const blankCount = layerIssues
+      .filter((i) => i.code.includes('blank'))
+      .reduce((acc, i) => acc + i.affectedCount, 0);
+
+    layerStats.push({
+      layer,
+      totalRecords: codes.length,
+      municipalityCoverage: Math.round(coverage * 10) / 10,
+      blankFieldPct: codes.length > 0 ? Math.round((blankCount / codes.length) * 1000) / 10 : 0,
+      outlierCount,
+      dataYear,
+    });
+  }
+
+  // Point layers coverage
+  const pointLayerData: Array<[IntegrityLayer, TransitStopCollection | FacilityCollection | null]> = [
+    ['transit', input.transitStops],
+    ['healthcare', input.healthFacilities],
+    ['schools', input.schools],
+    ['amenities', input.amenities],
+  ];
+  for (const [layer, fc] of pointLayerData) {
+    const count = fc?.features.length ?? 0;
+    coverageByLayer[layer] = [`${count} points`];
+    layerStats.push({
+      layer,
+      totalRecords: count,
+      municipalityCoverage: count > 0 ? -1 : 0, // -1 = not municipality-based
+      blankFieldPct: 0,
+      outlierCount: 0,
+      dataYear: null,
+    });
+  }
+
   return {
     generatedAt: new Date().toISOString(),
     totalIssues: issues.length,
     bySeverity,
     layers,
+    layerStats,
+    coverageByLayer,
   };
 }

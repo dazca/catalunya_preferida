@@ -7,6 +7,10 @@ import type { LayerId, LayerMeta } from '../types';
 import type {
   LayerConfigs,
   LayerTransferConfig,
+  VoteMetric,
+} from '../types/transferFunction';
+import {
+  PARTY_METRIC_KEY,
 } from '../types/transferFunction';
 import {
   evaluateTransferFunction,
@@ -14,6 +18,7 @@ import {
   scoreAspectAngle,
 } from './transferFunction';
 import { evaluateCustomFormula } from './formulaEngine';
+import { POLITICAL_AXES, axisLayerId, axisIdFromLayerId, computeAxisScore } from './politicalAxes';
 import type {
   VoteSentiment,
   TerrainStats,
@@ -88,6 +93,26 @@ export function buildRawFormulaValues(
     votesIndep: votes?.independencePct,
     votesUnionist: votes?.unionistPct,
     votesTurnout: votes?.turnoutPct,
+    // Party variables
+    votesERC: votes?.partyPcts?.ERC,
+    votesCUP: votes?.partyPcts?.CUP,
+    votesPODEM: votes?.partyPcts?.PODEM,
+    votesJUNTS: votes?.partyPcts?.JUNTS,
+    votesCOMUNS: votes?.partyPcts?.COMUNS,
+    votesPP: votes?.partyPcts?.PP,
+    votesVOX: votes?.partyPcts?.VOX,
+    votesPSC: votes?.partyPcts?.PSC,
+    votesCs: votes?.partyPcts?.Cs,
+    votesPDeCAT: votes?.partyPcts?.PDeCAT,
+    votesCiU: votes?.partyPcts?.CiU,
+    votesOtherParties: votes?.partyPcts?.OTHER,
+    // Political axis variables (computed from partyPcts × axis weights)
+    ...Object.fromEntries(
+      POLITICAL_AXES.map(axis => [
+        axisLayerId(axis.id),
+        votes?.partyPcts ? computeAxisScore(axis, votes.partyPcts) : undefined,
+      ]),
+    ),
     forest: forest?.forestPct,
     airQualityPm10: air?.pm10,
     airQualityNo2: air?.no2,
@@ -165,7 +190,7 @@ type LayerScorer = (
   data: MunicipalityData,
 ) => { score: number; disqualified: boolean } | undefined;
 
-const SCORERS: Record<LayerId, LayerScorer> = {
+const SCORERS: { [key: string]: LayerScorer } = {
   terrainSlope: (codi, configs, data) => {
     const t = data.terrain[normalizeIne(codi)];
     if (!t) return undefined;
@@ -220,6 +245,51 @@ const SCORERS: Record<LayerId, LayerScorer> = {
     if (!term) return undefined;
     return combineSubScores([scoreSingleTf(v.turnoutPct, term.value)]);
   },
+
+  // ── Party vote scorers (read from partyPcts + partyVotes.terms) ──
+  ...(() => {
+    /** Build a scorer for a party LayerId by looking up partyPcts and partyVotes.terms. */
+    function partyScorer(metric: VoteMetric): LayerScorer {
+      const partyKey = PARTY_METRIC_KEY[metric];
+      return (codi, configs, data) => {
+        const v = data.votes[normalizeIne(codi)];
+        if (!v || !v.partyPcts || !partyKey) return undefined;
+        const value = v.partyPcts[partyKey];
+        const term = configs.partyVotes.terms.find((t) => t.metric === metric);
+        if (!term) return undefined;
+        return combineSubScores([scoreSingleTf(value, term.value)]);
+      };
+    }
+    return {
+      votesERC:          partyScorer('ercPct'),
+      votesCUP:          partyScorer('cupPct'),
+      votesPODEM:        partyScorer('podemPct'),
+      votesJUNTS:        partyScorer('juntsPct'),
+      votesCOMUNS:       partyScorer('comunsPct'),
+      votesPP:           partyScorer('ppPct'),
+      votesVOX:          partyScorer('voxPct'),
+      votesPSC:          partyScorer('pscPct'),
+      votesCs:           partyScorer('csPct'),
+      votesPDeCAT:       partyScorer('pdecatPct'),
+      votesCiU:          partyScorer('ciuPct'),
+      votesOtherParties: partyScorer('otherPartiesPct'),
+    } satisfies Partial<Record<LayerId, LayerScorer>>;
+  })(),
+
+  // ── Political axis scorers (derived from POLITICAL_AXES registry) ──
+  ...Object.fromEntries(
+    POLITICAL_AXES.map(axis => [
+      axisLayerId(axis.id),
+      ((codi: string, configs: LayerConfigs, data: MunicipalityData) => {
+        const v = data.votes[normalizeIne(codi)];
+        if (!v?.partyPcts) return undefined;
+        const rawPct = computeAxisScore(axis, v.partyPcts);
+        const ltc = configs.axisConfigs?.[axis.id];
+        if (!ltc) return undefined;
+        return combineSubScores([scoreSingleTf(rawPct, ltc)]);
+      }) as LayerScorer,
+    ]),
+  ),
 
   transit: (codi, configs, data) => {
     const d = data.transitDistKm[normalizeIne(codi)];

@@ -9,6 +9,7 @@ import type { LayerConfigs } from '../types/transferFunction';
 import type { MunicipalityData } from './scorer';
 import { scoreSingleTf, combineSubScores, normalizeIne } from './scorer';
 import { scoreAspect, scoreAspectAngle } from './transferFunction';
+import { POLITICAL_AXES, axisIdFromLayerId, computeAxisScore } from './politicalAxes';
 import {
   nearestDistanceKm,
   pointInPolygon,
@@ -242,8 +243,23 @@ function scorePointLayer(
       rawValues.amenityDistKm = distances.amenity;
       return combineSubScores([scoreSingleTf(distances.amenity, configs.amenities)]);
 
-    default:
+    default: {
+      // Political axis layers
+      const axisId = axisIdFromLayerId(layerId);
+      if (axisId) {
+        const v = codi ? data.votes[codi] : undefined;
+        if (!v?.partyPcts) return undefined;
+        const rawPct = computeAxisScore(
+          POLITICAL_AXES.find(a => a.id === axisId)!,
+          v.partyPcts,
+        );
+        const ltc = configs.axisConfigs?.[axisId];
+        if (!ltc) return undefined;
+        rawValues[`axis_${axisId}`] = rawPct;
+        return combineSubScores([scoreSingleTf(rawPct, ltc)]);
+      }
       return undefined;
+    }
   }
 }
 
