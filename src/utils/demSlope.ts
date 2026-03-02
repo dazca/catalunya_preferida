@@ -912,27 +912,30 @@ export function sampleDemViewport(
             iv = fineElevAtWorldPx(fwpx + 1, fwpy + 1, fz) ?? NaN;
           }
 
-          // Skip pixel if centre is no-data
-          if (isNaN(ev)) continue;
-          // NaN-safe: substitute centre elevation for missing neighbours
-          if (isNaN(a))  a  = ev;  if (isNaN(b))  b  = ev;  if (isNaN(cv)) cv = ev;
-          if (isNaN(d))  d  = ev;  if (isNaN(fv)) fv = ev;
-          if (isNaN(g))  g  = ev;  if (isNaN(h))  h  = ev;  if (isNaN(iv)) iv = ev;
+          // If fine tile centre is NaN, fall through to Z=9 fallback
+          // (coarser DEM may still have coverage for this pixel).
+          if (!isNaN(ev)) {
+            // NaN-safe: substitute centre elevation for missing neighbours
+            if (isNaN(a))  a  = ev;  if (isNaN(b))  b  = ev;  if (isNaN(cv)) cv = ev;
+            if (isNaN(d))  d  = ev;  if (isNaN(fv)) fv = ev;
+            if (isNaN(g))  g  = ev;  if (isNaN(h))  h  = ev;  if (isNaN(iv)) iv = ev;
 
-          const dzdx = ((cv + 2*fv + iv) - (a + 2*d + g)) / (8 * fCellW);
-          const dzdy = ((g  + 2*h  + iv) - (a + 2*b + cv)) / (8 * fCellH);
-          const grad = dzdx*dzdx + dzdy*dzdy;
-          slopes[idx]     = Math.atan(Math.sqrt(grad)) * (180 / Math.PI);
-          elevations[idx] = ev;
-          if (grad < FLAT_GRAD_THRESHOLD) {
-            aspects[idx] = 255; // flat sentinel
-          } else {
-            let deg = Math.atan2(-dzdx, dzdy) * (180 / Math.PI);
-            if (deg < 0) deg += 360;
-            aspects[idx] = Math.min(254, Math.round(deg * 255 / 360));
+            const dzdx = ((cv + 2*fv + iv) - (a + 2*d + g)) / (8 * fCellW);
+            const dzdy = ((g  + 2*h  + iv) - (a + 2*b + cv)) / (8 * fCellH);
+            const grad = dzdx*dzdx + dzdy*dzdy;
+            slopes[idx]     = Math.atan(Math.sqrt(grad)) * (180 / Math.PI);
+            elevations[idx] = ev;
+            if (grad < FLAT_GRAD_THRESHOLD) {
+              aspects[idx] = 255; // flat sentinel
+            } else {
+              let deg = Math.atan2(-dzdx, dzdy) * (180 / Math.PI);
+              if (deg < 0) deg += 360;
+              aspects[idx] = Math.min(254, Math.round(deg * 255 / 360));
+            }
+            hasData[idx] = 1;
+            continue;
           }
-          hasData[idx] = 1;
-          continue;
+          // else: NaN centre in fine tile — fall through to Z=9
         }
       }
 

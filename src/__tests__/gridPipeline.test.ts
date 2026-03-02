@@ -31,7 +31,6 @@ import {
   buildAllVariableGrids,
   acquireFloat32,
   releaseFloat32,
-  MUNICIPALITY_VARS,
   ALL_MUNICIPALITY_VARS,
 } from '../utils/variableGrids';
 import type { MunicipalityLUT } from '../utils/variableGrids';

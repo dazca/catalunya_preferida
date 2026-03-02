@@ -94,14 +94,40 @@ export default function ViewMenu() {
         <Toggle label="Score Heatmap" checked={view.showHeatmap} onChange={(v) => set('showHeatmap', v)} />
         <Toggle label="Choropleth" checked={view.showChoropleth} onChange={(v) => set('showChoropleth', v)} />
         {view.showHeatmap && (
-          <Slider
-            label="Opacity"
-            value={view.heatmapOpacity}
-            min={0.1}
-            max={1.0}
-            step={0.05}
-            onChange={(v) => set('heatmapOpacity', v)}
-          />
+          <>
+            <Slider
+              label="Opacity"
+              value={view.heatmapOpacity}
+              min={0.1}
+              max={1.0}
+              step={0.05}
+              onChange={(v) => set('heatmapOpacity', v)}
+            />
+
+            <div className="vm-slider">
+              <span className="vm-slider-label">Resolution</span>
+              <select
+                className="vm-select"
+                value={view.heatmapResolutionMode}
+                onChange={(e) => set('heatmapResolutionMode', e.target.value as ViewSettings['heatmapResolutionMode'])}
+              >
+                <option value="auto">Auto</option>
+                <option value="full">Full</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+
+            {view.heatmapResolutionMode === 'custom' && (
+              <Slider
+                label="Scale"
+                value={view.heatmapResolutionScale}
+                min={1}
+                max={8}
+                step={0.5}
+                onChange={(v) => set('heatmapResolutionScale', v)}
+              />
+            )}
+          </>
         )}
       </div>
 

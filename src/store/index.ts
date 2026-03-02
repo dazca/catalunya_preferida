@@ -61,6 +61,10 @@ export interface ViewSettings {
   showPOI: boolean;
   /** Use WebGPU compute shaders for heatmap rendering when available. */
   useGpuRendering: boolean;
+  /** Heatmap raster resolution strategy. */
+  heatmapResolutionMode: 'auto' | 'full' | 'custom';
+  /** User-selected resolution multiplier for custom mode (1x–4x). */
+  heatmapResolutionScale: number;
 }
 
 export const DEFAULT_VIEW: ViewSettings = {
@@ -78,6 +82,8 @@ export const DEFAULT_VIEW: ViewSettings = {
   showLabels: true,
   showPOI: true,
   useGpuRendering: true,
+  heatmapResolutionMode: 'full',
+  heatmapResolutionScale: 1,
 };
 
 export interface DataIntegritySuggestion {
@@ -431,7 +437,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'better-idealista-config',
-      version: 12,
+      version: 14,
       // Persist everything except transient UI state
       partialize: (state) => ({
         layers: state.layers,
@@ -722,6 +728,31 @@ export const useAppStore = create<AppState>()(
           const view = (state.view as Record<string, unknown> | undefined) ?? {};
           if (typeof view.useGpuRendering !== 'boolean') {
             view.useGpuRendering = true;
+          }
+          state.view = { ...DEFAULT_VIEW, ...view };
+        }
+
+        // ── v12 → v13: add heatmap resolution controls ───────────
+        if (version < 13) {
+          const view = (state.view as Record<string, unknown> | undefined) ?? {};
+          const mode = view.heatmapResolutionMode;
+          if (mode !== 'auto' && mode !== 'full' && mode !== 'custom') {
+            view.heatmapResolutionMode = 'full';
+          }
+          const rawScale = Number(view.heatmapResolutionScale);
+          if (!Number.isFinite(rawScale)) {
+            view.heatmapResolutionScale = 1;
+          } else {
+            view.heatmapResolutionScale = Math.max(1, Math.min(8, rawScale));
+          }
+          state.view = { ...DEFAULT_VIEW, ...view };
+        }
+
+        // ── v13 → v14: promote legacy "auto" default to "full" ─
+        if (version < 14) {
+          const view = (state.view as Record<string, unknown> | undefined) ?? {};
+          if (view.heatmapResolutionMode === 'auto') {
+            view.heatmapResolutionMode = 'full';
           }
           state.view = { ...DEFAULT_VIEW, ...view };
         }

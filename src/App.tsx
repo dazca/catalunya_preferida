@@ -2,6 +2,7 @@
  * @file App component: root of the application.
  *       Wires together MapContainer, Sidebar, ViewMenu, and scoring engine.
  */
+
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import MapContainer from './components/MapContainer';
 import MunicipalityInfo from './components/MunicipalityInfo';
@@ -155,11 +156,24 @@ export default function App() {
   /** Current viewport spec — drives heatmap re-render on pan/zoom. */
   const [viewportSpec, setViewportSpec] = useState<ViewportSpec>(CATALONIA_VIEWPORT);
   /** Higher-resolution spec for the grid-based pipeline (up to 1024px). */
-  const [gridSpec, setGridSpec] = useState<ViewportSpec>(CATALONIA_VIEWPORT);
+  const [gridSpec, setGridSpec] = useState<ViewportSpec>(() =>
+    gridViewportSpecForZoom(
+      CATALONIA_VIEWPORT.w,
+      CATALONIA_VIEWPORT.s,
+      CATALONIA_VIEWPORT.e,
+      CATALONIA_VIEWPORT.n,
+      8,
+      {
+        mode: view.heatmapResolutionMode,
+        scale: view.heatmapResolutionScale,
+      },
+    ) as ViewportSpec,
+  );
   const heatmapTimer = useRef<ReturnType<typeof setTimeout> | number>(0);
   /** Tracks whether the initial (first) heatmap render has completed. */
   const firstRenderDone = useRef(false);
   const viewportDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastViewportRef = useRef<{ w: number; s: number; e: number; n: number; zoom: number } | null>(null);
 
   /** Zoom level above which the heatmap renders only the visible viewport for higher density. */
   const ZOOM_VIEWPORT_THRESHOLD = 10;
@@ -171,6 +185,7 @@ export default function App() {
       // Shorter debounce at high zoom for snappier re-renders when panning.
       const debounceMs = zoom >= ZOOM_VIEWPORT_THRESHOLD ? 300 : 600;
       viewportDebounce.current = setTimeout(() => {
+        lastViewportRef.current = { w, s, e, n, zoom };
         // At high zoom, clip to the actual visible viewport for higher pixel density.
         // At overview zoom, use full Catalonia to avoid partial overlay seams under pitch/bearing.
         const bw = zoom >= ZOOM_VIEWPORT_THRESHOLD ? w : CATALONIA_VIEWPORT.w;
@@ -178,7 +193,12 @@ export default function App() {
         const be = zoom >= ZOOM_VIEWPORT_THRESHOLD ? e : CATALONIA_VIEWPORT.e;
         const bn = zoom >= ZOOM_VIEWPORT_THRESHOLD ? n : CATALONIA_VIEWPORT.n;
         setViewportSpec(viewportSpecForZoom(bw, bs, be, bn, zoom));
-        setGridSpec(gridViewportSpecForZoom(bw, bs, be, bn, zoom) as ViewportSpec);
+        setGridSpec(
+          gridViewportSpecForZoom(bw, bs, be, bn, zoom, {
+            mode: view.heatmapResolutionMode,
+            scale: view.heatmapResolutionScale,
+          }) as ViewportSpec,
+        );
         // Demand-load fine DEM tiles for this viewport
         const targetM = Math.max(80, Math.min(3000, Math.round(15_000 / Math.pow(2, zoom - 8))));
         loadViewportTiles(bw, bs, be, bn, targetM).then((anyNew) => {
@@ -186,8 +206,25 @@ export default function App() {
         });
       }, debounceMs);
     },
-    [],
+    [view.heatmapResolutionMode, view.heatmapResolutionScale],
   );
+
+  useEffect(() => {
+    const vp = lastViewportRef.current;
+    if (!vp) return;
+
+    const bw = vp.zoom >= ZOOM_VIEWPORT_THRESHOLD ? vp.w : CATALONIA_VIEWPORT.w;
+    const bs = vp.zoom >= ZOOM_VIEWPORT_THRESHOLD ? vp.s : CATALONIA_VIEWPORT.s;
+    const be = vp.zoom >= ZOOM_VIEWPORT_THRESHOLD ? vp.e : CATALONIA_VIEWPORT.e;
+    const bn = vp.zoom >= ZOOM_VIEWPORT_THRESHOLD ? vp.n : CATALONIA_VIEWPORT.n;
+
+    setGridSpec(
+      gridViewportSpecForZoom(bw, bs, be, bn, vp.zoom, {
+        mode: view.heatmapResolutionMode,
+        scale: view.heatmapResolutionScale,
+      }) as ViewportSpec,
+    );
+  }, [view.heatmapResolutionMode, view.heatmapResolutionScale]);
 
   /**
    * Bump this counter once when DEM slope data finishes loading so the

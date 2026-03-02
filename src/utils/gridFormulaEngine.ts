@@ -409,17 +409,12 @@ export function computeVisualScoreGrid(
 
   // Apply disqualification mask
   const disqMask = buildDisqualificationMask(variableGrids, terrainGrids, enabledLayers, configs, n);
-  const hasTerrainLayer = enabledLayers.some(l =>
-    l.id === 'terrainSlope' || l.id === 'terrainElevation' || l.id === 'terrainAspect');
-  const hasDataArr = terrainGrids?.hasData ?? null;
   for (let i = 0; i < n; i++) {
     if (disqMask[i]) scores[i] = DISQUALIFIED;
-    // Pixels outside all municipalities (membership = -1) → NaN sentinel
+    // Pixels outside all municipalities (membership = -1) -> NaN sentinel
     if (membershipRaster[i] < 0) scores[i] = NaN;
-    // Pixels without DEM data when terrain layers are active → NaN (transparent)
-    if (hasTerrainLayer && hasDataArr && !hasDataArr[i] && membershipRaster[i] >= 0) {
-      scores[i] = NaN;
-    }
+    // Pixels without DEM data: terrain layers already contributed 0 weight,
+    // so the score naturally reflects only non-terrain layers. No blanking.
   }
 
   // Compute min/max for normalisation

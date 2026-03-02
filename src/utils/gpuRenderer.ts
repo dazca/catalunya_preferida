@@ -56,7 +56,12 @@ export async function initGpuDevice(): Promise<GPUDevice | null> {
       return null;
     }
 
-    _gpuDevice = await adapter.requestDevice();
+    _gpuDevice = await adapter.requestDevice({
+      requiredLimits: {
+        maxBufferSize: adapter.limits.maxBufferSize,
+        maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
+      },
+    });
 
     _gpuDevice.lost.then((info) => {
       console.warn('[gpuRenderer] WebGPU device lost:', info.message);
@@ -180,8 +185,11 @@ fn readHasData(idx: u32) -> u32 {
 }
 
 @compute @workgroup_size(256)
-fn scoreMain(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let idx = gid.x;
+fn scoreMain(
+  @builtin(global_invocation_id) gid: vec3<u32>,
+  @builtin(num_workgroups) nwg: vec3<u32>,
+) {
+  let idx = gid.y * (nwg.x * 256u) + gid.x;
   if (idx >= uniforms.numPixels) {
     return;
   }
@@ -279,21 +287,10 @@ fn scoreMain(@builtin(global_invocation_id) gid: vec3<u32>) {
     finalScore = DISQUALIFIED;
   }
 
-  // No DEM data for terrain-active scenes -> NaN
-  if (hasTerrain && readHasData(idx) == 0u && featureIdx >= 0) {
-    // Check if any terrain layer is present
-    var hasTerrainLayer = false;
-    for (var li2: u32 = 0u; li2 < numLayers; li2 = li2 + 1u) {
-      let vi = layerParamsArr[li2].varIndex;
-      if (vi == -1 || vi == -2 || vi == -3) {
-        hasTerrainLayer = true;
-        break;
-      }
-    }
-    if (hasTerrainLayer) {
-      finalScore = NAN_SENTINEL;
-    }
-  }
+  // Pixels without DEM data: terrain layers were already skipped
+  // (rawVal stays NAN_SENTINEL for terrain layers when hasData==0),
+  // so the score naturally reflects only non-terrain layers.
+  // No need to blank the entire pixel.
 
   scores[idx] = finalScore;
 }
@@ -356,8 +353,11 @@ fn hslToRgba(h: f32, s: f32, l: f32, a: f32) -> u32 {
 }
 
 @compute @workgroup_size(256)
-fn colormapMain(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let idx = gid.x;
+fn colormapMain(
+  @builtin(global_invocation_id) gid: vec3<u32>,
+  @builtin(num_workgroups) nwg: vec3<u32>,
+) {
+  let idx = gid.y * (nwg.x * 256u) + gid.x;
   if (idx >= colorUniforms.numPixels) {
     return;
   }
@@ -824,8 +824,12 @@ export async function gpuRenderScoreGrid(
     ],
   });
 
-  // ── Dispatch ──
-  const workgroupCount = Math.ceil(n / 256);
+  // ── Dispatch (2D to handle >16M pixel grids) ──
+  const WG_SIZE = 256;
+  const MAX_WG_DIM = 65535;
+  const totalWg = Math.ceil(n / WG_SIZE);
+  const wgX = Math.min(totalWg, MAX_WG_DIM);
+  const wgY = Math.max(1, Math.ceil(totalWg / wgX));
 
   // Push error scope to capture validation errors
   device.pushErrorScope('validation');
@@ -835,13 +839,13 @@ export async function gpuRenderScoreGrid(
   const scorePass = encoder.beginComputePass({ label: 'score' });
   scorePass.setPipeline(pipeline.scorePipeline);
   scorePass.setBindGroup(0, scoreBindGroup);
-  scorePass.dispatchWorkgroups(workgroupCount);
+  scorePass.dispatchWorkgroups(wgX, wgY);
   scorePass.end();
 
   const colormapPass = encoder.beginComputePass({ label: 'colormap' });
   colormapPass.setPipeline(pipeline.colormapPipeline);
   colormapPass.setBindGroup(0, colormapBindGroup);
-  colormapPass.dispatchWorkgroups(workgroupCount);
+  colormapPass.dispatchWorkgroups(wgX, wgY);
   colormapPass.end();
 
   // Copy pixels to readback buffer

@@ -55,11 +55,16 @@ export interface HeatmapRenderResult {
 
 let _lastBlobUrl: string | null = null;
 
-/** Revoke previous blob URL to avoid memory leaks. */
+/**
+ * Revoke previous blob URL to avoid memory leaks.
+ * Deferred slightly so MapLibre has time to finish loading the old image
+ * before the URL is invalidated.
+ */
 function revokeOldBlobUrl(): void {
   if (_lastBlobUrl) {
-    URL.revokeObjectURL(_lastBlobUrl);
+    const toRevoke = _lastBlobUrl;
     _lastBlobUrl = null;
+    setTimeout(() => URL.revokeObjectURL(toRevoke), 2000);
   }
 }
 
@@ -67,17 +72,51 @@ function revokeOldBlobUrl(): void {
 async function pixelsToBlobUrl(
   pixels: Uint8ClampedArray, cols: number, rows: number,
 ): Promise<string> {
-  const canvas = document.createElement('canvas');
-  canvas.width = cols;
-  canvas.height = rows;
-  const ctx = canvas.getContext('2d')!;
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels.buffer as ArrayBuffer, pixels.byteOffset, pixels.length), cols, rows), 0, 0);
+  // Determine the safe output dimensions for the display pipeline.
+  // MapLibre paints this image as a WebGL texture; exceeding
+  // MAX_TEXTURE_SIZE causes silent partial uploads on some drivers.
+  const maxDim = getMaxDisplayDim();
+  let outW = cols;
+  let outH = rows;
+  if (outW > maxDim || outH > maxDim) {
+    const scale = maxDim / Math.max(outW, outH);
+    outW = Math.round(outW * scale);
+    outH = Math.round(outH * scale);
+    console.warn(
+      `[heatmapBridge] Downscaling heatmap image: ${cols}\u00d7${rows} \u2192 ${outW}\u00d7${outH} (display limit ${maxDim})`,
+    );
+  }
+
+  // Build the full-resolution ImageData
+  const imageData = new ImageData(
+    new Uint8ClampedArray(pixels.buffer as ArrayBuffer, pixels.byteOffset, pixels.length),
+    cols, rows,
+  );
+
+  // If downscaling is needed, use createImageBitmap for efficient resize
+  let canvas: HTMLCanvasElement | OffscreenCanvas;
+  if (outW !== cols || outH !== rows) {
+    const bitmap = await createImageBitmap(imageData, {
+      resizeWidth: outW,
+      resizeHeight: outH,
+      resizeQuality: 'medium',
+    });
+    canvas = document.createElement('canvas');
+    canvas.width = outW;
+    canvas.height = outH;
+    canvas.getContext('2d')!.drawImage(bitmap, 0, 0);
+    bitmap.close();
+  } else {
+    canvas = document.createElement('canvas');
+    canvas.width = cols;
+    canvas.height = rows;
+    canvas.getContext('2d')!.putImageData(imageData, 0, 0);
+  }
 
   const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
+    (canvas as HTMLCanvasElement).toBlob(
       (b) => (b ? resolve(b) : reject(new Error('toBlob returned null'))),
-      'image/webp',
-      0.65,
+      'image/png',
     );
   });
 
@@ -122,6 +161,49 @@ function getCachedVariableGrids(
 /** Catalonia bounds. */
 const CAT_W = 0.16, CAT_S = 40.52, CAT_E = 3.33, CAT_N = 42.86;
 
+export type HeatmapResolutionMode = 'auto' | 'full' | 'custom';
+
+/* ── Display-safe dimension detection ────────────────────────────── */
+
+/**
+ * Detect the maximum texture dimension supported by the WebGL context
+ * that MapLibre uses. Cached after first call.
+ */
+let _maxDisplayDim: number | null = null;
+
+function getMaxDisplayDim(): number {
+  if (_maxDisplayDim !== null) return _maxDisplayDim;
+  if (typeof document === 'undefined') {
+    _maxDisplayDim = 2048;
+    return _maxDisplayDim;
+  }
+  try {
+    const c = document.createElement('canvas');
+    c.width = 1;
+    c.height = 1;
+    const gl = c.getContext('webgl2') || c.getContext('webgl');
+    if (gl) {
+      const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+      // Stay well below the hardware limit — hitting exactly MAX_TEXTURE_SIZE
+      // causes partial texture uploads on some drivers (Chrome/ANGLE issue).
+      _maxDisplayDim = Math.max(512, Math.floor(maxTex * 0.75));
+      const ext = gl.getExtension('WEBGL_lose_context');
+      if (ext) ext.loseContext();
+    } else {
+      _maxDisplayDim = 2048;
+    }
+  } catch {
+    _maxDisplayDim = 2048;
+  }
+  console.debug(`[heatmapBridge] Max display dim: ${_maxDisplayDim}`);
+  return _maxDisplayDim;
+}
+
+export interface GridResolutionOptions {
+  mode?: HeatmapResolutionMode;
+  scale?: number;
+}
+
 /**
  * Grid-pipeline viewport spec with higher max dimension (1024 vs 512).
  * Uses the same metres-per-pixel targeting as the legacy function but
@@ -129,6 +211,7 @@ const CAT_W = 0.16, CAT_S = 40.52, CAT_E = 3.33, CAT_N = 42.86;
  */
 export function gridViewportSpecForZoom(
   vw: number, vs: number, ve: number, vn: number, zoom: number,
+  options: GridResolutionOptions = {},
 ): RasterSpec {
   const w = Math.max(vw, CAT_W);
   const s = Math.max(vs, CAT_S);
@@ -140,11 +223,37 @@ export function gridViewportSpecForZoom(
   const latMid = (s + n) / 2;
   const mPerDegLon = 111_320 * Math.cos(latMid * (Math.PI / 180));
   const mPerDegLat = 110_540;
-  const targetM = Math.max(5, Math.min(800, Math.round(4_000 / Math.pow(2, zoom - 8))));
+  const mode = options.mode ?? 'auto';
+  const scale = Math.max(1, Math.min(8, options.scale ?? 1));
 
-  const MAX = 2048;  // raised from 1024: viewport-only rendering covers a smaller area, same budget = more detail
-  const cols = Math.min(MAX, Math.max(100, Math.ceil((e - w) * mPerDegLon / targetM)));
-  const rows = Math.min(MAX, Math.max(75, Math.ceil((n - s) * mPerDegLat / targetM)));
+  const autoTargetM = Math.max(5, Math.min(800, Math.round(4_000 / Math.pow(2, zoom - 8))));
+
+  // The display pipeline cap: stay under MAX_TEXTURE_SIZE for MapLibre's
+  // WebGL context to avoid partial texture uploads.
+  const displayMax = getMaxDisplayDim();
+
+  let targetM = autoTargetM;
+  let maxDim = Math.min(2048, displayMax);
+  if (mode === 'full') {
+    targetM = 20;
+    maxDim = displayMax;
+  } else if (mode === 'custom') {
+    targetM = Math.max(5, Math.round(autoTargetM / scale));
+    maxDim = Math.min(displayMax, Math.round(2048 * scale));
+  }
+
+  let cols = Math.min(maxDim, Math.max(100, Math.ceil((e - w) * mPerDegLon / targetM)));
+  let rows = Math.min(maxDim, Math.max(75, Math.ceil((n - s) * mPerDegLat / targetM)));
+
+  // Cap total pixel count to keep GPU terrain buffer under 128 MiB
+  // (the WebGPU default maxStorageBufferBindingSize).
+  // 8 M pixels \u2192 terrain buf = 96 MB, well within limit.
+  const MAX_SAFE_PIXELS = 8_388_608;
+  if (cols * rows > MAX_SAFE_PIXELS) {
+    const aspect = cols / rows;
+    rows = Math.floor(Math.sqrt(MAX_SAFE_PIXELS / aspect));
+    cols = Math.floor(rows * aspect);
+  }
 
   return { w, s, e, n, cols, rows };
 }

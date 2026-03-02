@@ -905,13 +905,38 @@ function ViewMenuDropdown({ anchorRef }: { anchorRef: React.RefObject<HTMLDivEle
           <span>Choropleth</span>
         </label>
         {view.showHeatmap && (
-          <div className="fb-view-slider">
-            <span className="fb-view-slider-label">Opacity</span>
-            <input type="range" min={0.1} max={1} step={0.05}
-              value={view.heatmapOpacity}
-              onChange={(e) => setView({ heatmapOpacity: +e.target.value })} />
-            <span className="fb-view-slider-val">{view.heatmapOpacity.toFixed(2)}</span>
-          </div>
+          <>
+            <div className="fb-view-slider">
+              <span className="fb-view-slider-label">Opacity</span>
+              <input type="range" min={0.1} max={1} step={0.05}
+                value={view.heatmapOpacity}
+                onChange={(e) => setView({ heatmapOpacity: +e.target.value })} />
+              <span className="fb-view-slider-val">{view.heatmapOpacity.toFixed(2)}</span>
+            </div>
+
+            <div className="fb-view-slider">
+              <span className="fb-view-slider-label">Resolution</span>
+              <select
+                className="fb-view-select"
+                value={view.heatmapResolutionMode}
+                onChange={(e) => setView({ heatmapResolutionMode: e.target.value as typeof view.heatmapResolutionMode })}
+              >
+                <option value="auto">Auto</option>
+                <option value="full">Full</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+
+            {view.heatmapResolutionMode === 'custom' && (
+              <div className="fb-view-slider">
+                <span className="fb-view-slider-label">Scale</span>
+                <input type="range" min={1} max={8} step={0.5}
+                  value={view.heatmapResolutionScale}
+                  onChange={(e) => setView({ heatmapResolutionScale: +e.target.value })} />
+                <span className="fb-view-slider-val">{view.heatmapResolutionScale.toFixed(2)}x</span>
+              </div>
+            )}
+          </>
         )}
       </div>
 
